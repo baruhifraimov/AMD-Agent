@@ -1,5 +1,7 @@
 """Tests for ThreatIngestor pending-hash DB operations."""
 
+import sqlite3
+
 from src.db.tracker import MalwareTracker
 
 
@@ -42,3 +44,11 @@ def test_mark_corrupted_removes_from_pending_queue(tmp_paths):
     row = next(r for r in tracker.fetch_chronological() if r["sha256"] == sha)
     assert row["status"] == "corrupted"
     assert row["reject_reason"] == "pefile parse failed"
+
+
+def test_tracker_uses_wal_journal_mode(tmp_paths):
+    db_path = tmp_paths["db"]
+    MalwareTracker(db_path)
+    with sqlite3.connect(db_path) as conn:
+        journal_mode = conn.execute("PRAGMA journal_mode").fetchone()[0]
+    assert journal_mode == "wal"

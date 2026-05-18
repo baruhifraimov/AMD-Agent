@@ -8,6 +8,7 @@ path (MalwareBazaar hash lookup/download), never arbitrary CTI URLs.
 from __future__ import annotations
 
 import logging
+import time
 
 from src.config import CTI_PAGE_LIMIT
 from src.llm import generate_cti_queries, semantic_filter_hashes
@@ -33,7 +34,9 @@ class DynamicCTIProvider(PESourceProvider):
         evidence: list[dict] = []
         visited: set[str] = set()
 
-        for query in queries:
+        for index, query in enumerate(queries):
+            if index > 0:
+                time.sleep(2.0)
             for result in web_search(query):
                 if len(visited) >= CTI_PAGE_LIMIT:
                     break

@@ -55,6 +55,7 @@ class MalwareTracker:
     def _init_db(self) -> None:
         with self._connect() as conn:
             conn.executescript(_SCHEMA)
+            conn.execute("PRAGMA journal_mode=WAL;")
             self._migrate_schema(conn)
 
     @staticmethod

@@ -50,13 +50,20 @@ def fetch_public_text(url: str) -> str:
         return ""
     try:
         with httpx.Client(timeout=CTI_REQUEST_TIMEOUT, follow_redirects=True) as client:
-            response = client.get(url)
-            response.raise_for_status()
-            content = response.content[:CTI_PAGE_MAX_BYTES]
+            content = bytearray()
+            with client.stream("GET", url) as response:
+                response.raise_for_status()
+                for chunk in response.iter_bytes():
+                    remaining = CTI_PAGE_MAX_BYTES - len(content)
+                    if remaining <= 0:
+                        break
+                    content.extend(chunk[:remaining])
+                    if len(chunk) > remaining:
+                        break
     except Exception as exc:
         logger.warning("CTI page fetch failed for %s: %s", url, exc)
         return ""
-    soup = BeautifulSoup(content, "html.parser")
+    soup = BeautifulSoup(bytes(content), "html.parser")
     for tag in soup(["script", "style", "noscript"]):
         tag.decompose()
     return " ".join(soup.get_text(" ").split())

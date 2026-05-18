@@ -42,6 +42,20 @@ def model_retrain(state: AgentState) -> dict:
         historical_labels,
         new_labels,
     )
+    if bundle is None:
+        logger.warning("MADAR retrain skipped; no reusable model bundle is available")
+        return {
+            "drift_detected": False,
+            "new_labeled_batch": [],
+            "evaluation_metrics": {
+                **state.evaluation_metrics,
+                "retrained": 0.0,
+                "retrain_skipped_single_class": 1.0,
+                "replay_size": float(len(historical_features)),
+                "new_batch_size": float(len(new_features)),
+            },
+        }
+
     logger.info("MADAR retrain complete; threshold=%.4f", bundle.get("threshold", 0.5))
 
     return {

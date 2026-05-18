@@ -133,6 +133,14 @@ def cold_start_train(tracker: db.MalwareTracker) -> dict[str, Any] | None:
     val_end = int(n * 0.85)
     X_train, y_train = X[:train_end], y[:train_end]
     X_val, y_val = X[train_end:val_end], y[train_end:val_end]
+    if len(np.unique(y_train)) < 2:
+        logger.warning(
+            "Cold-start skipped: chronological train split has fewer than 2 classes "
+            "(n_train=%d, classes=%s)",
+            len(y_train),
+            np.unique(y_train).tolist(),
+        )
+        return None
 
     model = lgb.LGBMClassifier(
         n_estimators=100,
@@ -154,12 +162,21 @@ def retrain_model(
     y: np.ndarray,
     *,
     val_fraction: float = 0.15,
-) -> dict[str, Any]:
+) -> dict[str, Any] | None:
     """Retrain LightGBM and tune threshold on validation tail."""
     n = len(y)
     val_start = max(1, int(n * (1 - val_fraction)))
     X_train, y_train = X[:val_start], y[:val_start]
     X_val, y_val = X[val_start:], y[val_start:]
+
+    if len(np.unique(y_train)) < 2:
+        logger.warning(
+            "Retrain skipped: y_train contains fewer than 2 classes "
+            "(n_train=%d, classes=%s); reusing existing model bundle",
+            len(y_train),
+            np.unique(y_train).tolist(),
+        )
+        return load_bundle()
 
     model = lgb.LGBMClassifier(
         n_estimators=150,

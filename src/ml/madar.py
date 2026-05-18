@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 import numpy as np
 from sklearn.ensemble import IsolationForest
@@ -39,7 +40,7 @@ def madar_retrain(
     new_batch: list[dict],
     historical_labels: list[int],
     new_labels: list[int],
-) -> dict:
+) -> dict[str, Any] | None:
     """Build replay buffer + new batch, retrain LightGBM."""
     X_hist = vectorize_batch(historical_features) if historical_features else np.empty((0, 0))
     X_new = vectorize_batch(new_batch) if new_batch else np.empty((0, 0))

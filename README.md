@@ -1,205 +1,353 @@
 # AMD-Agent: Autonomous Continual Malware Detection
 
-## Project Purpose
+AMD-Agent is a LangGraph-based malware analysis pipeline for collecting Windows PE samples, extracting static features, detecting concept drift, explaining suspicious drift with capa + Ollama, and retraining a LightGBM classifier with MADAR replay.
 
-AMD-Agent is a cybersecurity ML pipeline designed to:
+The project is designed for isolated execution in Docker or a malware-analysis VM. Do not run downloaded binaries.
 
-- continuously collect Windows PE samples from internet sources,
-- classify samples as malicious or benign using static analysis features,
-- detect concept drift in incoming malware behavior, and
-- retrain itself with replay-based continual learning to stay effective over time.
+## Current Architecture
 
-The system is built for safe, repeatable operation in an isolated environment (VM and/or container), with persistent state in SQLite.
-
-## How the Pipeline Works
-
-High-level graph flow:
-
-```
-START → SourceSelector ─┬─ (benign) → SourceDiscovery → BinaryFetch
-                        └─ (malware) → ThreatQueue ─┬─ queue has hashes → BinaryFetch
-                                                    └─ queue empty      → SourceDiscovery
-      → DataValidation → FeatureExtraction → DriftMonitor ─┬─ no drift → ClassifierInference → END
-                                                           └─ drift    → ActiveLearningExplain → ModelRetrain → END
+```text
+START
+  -> SourceSelector
+      -> benign path: SourceDiscovery
+      -> malware path: ThreatQueue
+          -> queue has hashes: BinaryFetch
+          -> queue empty: SourceDiscovery
+  -> BinaryFetch
+  -> DataValidation
+  -> FeatureExtraction
+  -> DriftMonitor
+      -> no drift: ClassifierInference -> END
+      -> drift: ActiveLearningExplain -> ModelRetrain -> END
 ```
 
-### Node-by-node behavior
+### Main components
 
-1. `SourceSelector`
-   - Uses Ollama tool binding when available, with deterministic fallback.
-   - Chooses malware vs benign ingestion mode based on dataset balance in SQLite.
-   - Helps ensure the model sees enough benign negatives for valid FPR tuning.
+- `SourceSelector`: asks Ollama to choose source strategy when available, with deterministic fallback based on malware/benign balance in SQLite.
+- `ThreatQueue`: consumes pending hashes inserted by ThreatIngestor. Corrupted hashes are skipped.
+- `SourceDiscovery`: discovers samples from one or more registered providers.
+- `BinaryFetch`: downloads through each candidate's own provider, not a global provider.
+- `DataValidation`: checks MZ header, de-duplicates, and syncs SQLite status.
+- `FeatureExtraction`: extracts 15 PE features using `pefile`; parse failures are triaged and marked `corrupted`.
+- `DriftMonitor`: uses River ADWIN over section entropy.
+- `ClassifierInference`: scores samples with LightGBM and FPR-aware thresholding.
+- `ActiveLearningExplain`: runs `capa -j -r <rules_dir>` and asks Ollama to produce a semantic drift report.
+- `ModelRetrain`: retrains with MADAR replay buffer. Single-class retrain batches are skipped safely.
+- `Evaluation`: runs TESSERACT-style chronological evaluation and computes AUT.
 
-2. `ThreatQueue` (malware path only)
-   - Pulls pending malware hashes inserted by external ThreatIngestor daemon.
-   - If queue has work, pipeline downloads those hashes first.
-   - If queue is empty, falls back to live discovery from source APIs.
+## Data Sources
 
-3. `SourceDiscovery`
-   - Discovers candidate PE items from selected provider(s): MalwareBazaar, Dynamic CTI, Sysinternals, GitHub releases.
+### Malware
 
-4. `BinaryFetch`
-   - Downloads bytes using provider-specific logic.
-   - Computes content SHA256 and stores sample under sandbox path.
+- MalwareBazaar API:
+  - recent PE metadata discovery,
+  - SHA256-based sample download,
+  - password-protected ZIP extraction using password `infected`.
 
-5. `DataValidation`
-   - Checks PE signature (`MZ`).
-   - Handles duplicate semantics:
-     - already-downloaded samples are skipped,
-     - pending ThreatIngestor rows are updated with file path.
+- Dynamic CTI discovery:
+  - DuckDuckGo search,
+  - public CTI page fetching with strict byte truncation,
+  - SHA256 extraction with surrounding evidence,
+  - semantic hash filtering through Ollama when available.
 
-6. `FeatureExtraction`
-   - Extracts fixed PE feature vector (15 features) via `pefile`.
+Dynamic CTI uses a Hybrid Strict policy: CTI pages are used only as evidence for hashes. Arbitrary CTI URLs are not used for binary download.
 
-7. `DriftMonitor`
-   - Uses River ADWIN on entropy stream to flag drift.
+### Benign
 
-8. `ClassifierInference` (no drift)
-   - Loads LightGBM model bundle, predicts malicious probabilities, tracks threshold/FPR metrics.
+- Sysinternals live directory.
+- GitHub release assets from curated benign repositories.
+- Optional local benign corpus under `data/benign`.
 
-9. `ActiveLearningExplain` + `ModelRetrain` (drift)
-   - Runs Mandiant capa with an explicit rules directory and asks Ollama to summarize drift capabilities.
-   - Retrains using MADAR-style replay:
-     - IsolationForest sampling,
-     - 80/20 core/outlier replay split,
-     - retrain LightGBM and persist updated model.
+## Safety And Persistence
 
-## Data Sources and Discovery Tools
+- Docker runs on isolated `malware_net`.
+- `docker/entrypoint.sh` blocks egress to private/local subnets with `iptables`.
+- `docker-compose.yml` grants `NET_ADMIN`, required for those `iptables` rules.
+- Docker allows `host.docker.internal:11434` for Ollama before private subnet blocking.
+- SQLite uses WAL mode to reduce lock errors with external ThreatIngestor writes.
+- LangGraph uses `MemorySaver` checkpointer with default thread id `amd-agent-default`.
+- Downloaded samples are stored under sandbox paths and are never executed.
 
-### Malware source
-- **MalwareBazaar API**
-  - `get_recent` for live discovery
-  - `get_file` for SHA256-based sample retrieval
-  - password-protected ZIP extraction (`infected`)
+## SQLite Sample Status
 
-- **Dynamic CTI discovery**
-  - Uses DuckDuckGo search and public CTI page text to discover SHA256 indicators.
-  - Hybrid Strict policy: CTI pages provide evidence only; binary downloads still go through registered providers.
+`samples` rows include:
 
-### Benign sources
-- **Sysinternals live directory**
-  - scrapes `.exe` links from Microsoft-hosted pages
-- **GitHub Releases API**
-  - pulls `.exe` / `.zip` release assets from curated repositories
+| Column | Meaning |
+|---|---|
+| `sha256` | sample hash |
+| `file_path` | sandbox path; empty string for pending queue rows |
+| `acquired_at` | acquisition timestamp |
+| `features_json` | extracted static PE features |
+| `label` | `1` malware, `0` benign |
+| `prediction` | LightGBM malicious probability |
+| `anomaly_score` | reserved anomaly score |
+| `status` | `pending`, `active`, or `corrupted` |
+| `reject_reason` | raw rejection/parse reason |
+| `rejected_at` | rejection timestamp |
 
-### External queue source (optional but recommended)
-- **ThreatIngestor daemon** (Option A)
-  - runs independently in background,
-  - inserts pending hashes into SQLite (`file_path=''`, `label=1`),
-  - pipeline consumes queue before live malware polling.
+ThreatQueue only consumes pending malware rows where `file_path=''` and `status` is `pending` or `active`. Rows marked `corrupted` are not retried.
 
-## Libraries and Technologies Used
+## Requirements
 
-### Core orchestration and state
-- `langgraph` — workflow graph and conditional routing
-- LangGraph `MemorySaver` checkpointer for in-process state persistence
-- `pydantic` — strict state/config models
-- `langchain-ollama` — local Ollama tool binding and report generation
+- Python 3.12.
+- Docker Desktop for container execution.
+- MalwareBazaar API key.
+- Ollama running locally for LLM decisions/reports.
+- capa rules directory:
+  - Docker build clones official `capa-rules` into `/opt/capa-rules`.
+  - Local runs need `AMD_CAPA_RULES_DIR` pointing to a valid rules directory.
 
-### Networking and parsing
-- `httpx` — API/HTTP client
-- `beautifulsoup4` — benign source HTML parsing
-- `pyzipper` / `zipfile` — ZIP extraction
+Python dependencies are listed in `requirements.txt`, including:
 
-### Malware static analysis and ML
-- `pefile` — PE structure and import extraction
-- `river` — ADWIN concept drift detection
-- `lightgbm` — classifier baseline
-- `scikit-learn` — IsolationForest for MADAR replay sampling
-- `numpy`, `pandas`, `joblib` — numerical work and persistence
+- `langgraph`, `pydantic`
+- `langchain-ollama`, `langchain-core`
+- `httpx`, `beautifulsoup4`, `duckduckgo-search`
+- `pefile`, `pyzipper`, `flare-capa`
+- `river`, `lightgbm`, `scikit-learn`
+- `numpy`, `pandas`, `joblib`, `matplotlib`
+- `pytest`, `pytest-httpx`
 
-### Storage, evaluation, runtime
-- `sqlite3` — persistent sample tracker (`malware_tracker.db`)
-- `matplotlib` — temporal performance plots
-- `flare-capa` + `capa-rules` — malware capability extraction during drift explanation
-- custom scheduler loop (`--daemon`) + YAML/env configuration
+## Configuration
 
-### Environment and operations
-- Python 3.12
-- Docker support (optional)
-- VM-first security posture for handling live malware
+Create local environment file:
 
-## Runtime Modes
+```powershell
+copy .env.example .env
+```
 
-### Single run
-```bash
-export PYTHONPATH=.
+Required:
+
+```env
+MALWAREBAZAAR_AUTH_KEY=your-auth-key
+```
+
+Common Ollama setup:
+
+```env
+AMD_OLLAMA_ENABLED=1
+AMD_OLLAMA_BASE_URL=http://localhost:11434
+AMD_OLLAMA_MODEL=gemma4:latest
+AMD_OLLAMA_TIMEOUT=8
+```
+
+In Docker, compose overrides Ollama URL to:
+
+```env
+AMD_OLLAMA_BASE_URL=http://host.docker.internal:11434
+```
+
+If you want the README default model instead:
+
+```powershell
+ollama pull llama3.1:8b
+```
+
+Other useful variables:
+
+| Variable | Purpose |
+|---|---|
+| `GITHUB_TOKEN` | optional GitHub token for release API rate limits |
+| `AMD_BENIGN_PROVIDER` | force benign provider: `sysinternals` or `github` |
+| `AMD_ALLOW_LOCAL_BENIGN` | ingest `data/benign/*` as label `0` |
+| `AMD_THREAT_QUEUE_ENABLED` | enable/disable ThreatIngestor queue consumption |
+| `AMD_CAPA_RULES_DIR` | capa rules directory passed with `-r` |
+| `AMD_REPORT_LANGUAGE` | language for Ollama drift report |
+| `AMD_CTI_SEARCH_LIMIT` | max search results per CTI query |
+| `AMD_CTI_PAGE_LIMIT` | max CTI pages per discovery run |
+| `AMD_CTI_PAGE_MAX_BYTES` | max bytes read from each CTI page |
+| `AMD_CTI_REQUEST_TIMEOUT` | CTI HTTP timeout |
+
+## Docker Run
+
+Start Docker Desktop first.
+
+Build:
+
+```powershell
+docker compose build
+```
+
+Run once:
+
+```powershell
+docker compose run --rm amd-agent python -m src.graph --once
+```
+
+Run daemon:
+
+```powershell
+docker compose run --rm amd-agent python -m src.graph --daemon
+```
+
+Docker persists DB, models, logs, and figures under `./data`.
+
+## Local Run
+
+Install dependencies:
+
+```powershell
+python -m pip install -r requirements.txt
+```
+
+Set Python path:
+
+```powershell
+$env:PYTHONPATH="."
+```
+
+Run once:
+
+```powershell
 python -m src.graph --once
 ```
 
-### Continuous daemon
-```bash
-export PYTHONPATH=.
-export AMD_SCHED_ENABLED=1
-export AMD_SCHED_INTERVAL=1800
+Run daemon:
+
+```powershell
 python -m src.graph --daemon
 ```
 
-### Daemon with YAML config
-```bash
-cp scheduler.yaml.example scheduler.yaml
-python -m src.graph --daemon --config scheduler.yaml
+Local capa setup example:
+
+```powershell
+git clone https://github.com/mandiant/capa-rules.git C:\capa-rules
+$env:AMD_CAPA_RULES_DIR="C:\capa-rules"
 ```
 
-## Key Configuration Variables
+## ThreatIngestor Integration
 
-| Variable | Description |
-|---|---|
-| `MALWAREBAZAAR_AUTH_KEY` | Required API key for MalwareBazaar |
-| `GITHUB_TOKEN` | Optional token to reduce GitHub API rate limits |
-| `AMD_SCHED_ENABLED` | Enable scheduler mode |
-| `AMD_SCHED_INTERVAL` | Seconds between scheduled runs |
-| `AMD_BENIGN_PROVIDER` | Force benign provider (`sysinternals` or `github`) |
-| `AMD_ALLOW_LOCAL_BENIGN` | Optional local benign fallback |
-| `AMD_THREAT_QUEUE_ENABLED` | Enable ThreatIngestor pending queue consumption |
-| `AMD_OLLAMA_ENABLED` | Enable Ollama decisions/summaries (`0` disables) |
-| `AMD_OLLAMA_BASE_URL` | Ollama endpoint |
-| `AMD_OLLAMA_MODEL` | Local Ollama model name |
-| `AMD_CAPA_RULES_DIR` | capa rules directory passed with `capa -r` |
-| `AMD_REPORT_LANGUAGE` | Language for LLM drift report |
+ThreatIngestor may run as a separate process and write pending hashes into SQLite.
 
-## ThreatIngestor Integration (Option A)
+Template:
 
-Use two processes:
-
-```bash
-# Terminal 1: external hash discovery
-cp threatingestor_config.yml.example threatingestor_config.yml
+```powershell
+copy threatingestor_config.yml.example threatingestor_config.yml
 threatingestor -c threatingestor_config.yml
-
-# Terminal 2: pipeline processing loop
-export PYTHONPATH=.
-python -m src.graph --daemon
 ```
 
-Pending row contract in SQLite:
+Expected pending row contract:
 
 | Column | Value |
 |---|---|
-| `sha256` | 64-char hash |
-| `file_path` | empty string (`''`) |
+| `sha256` | 64-char SHA256 |
+| `file_path` | empty string |
 | `label` | `1` |
+| `status` | `pending` |
 | `acquired_at` | timestamp |
-| `status` | `pending` for queued rows; `corrupted` rows are skipped |
 
 ## Evaluation
 
-Temporal (TESSERACT-style) evaluation is provided in `src/evaluation/tesseract.py`:
+TESSERACT-style evaluation is implemented in `src/evaluation/tesseract.py`.
 
-- chronological splits (train/val/test by time),
-- metrics: accuracy, precision, recall, FPR,
-- AUT (`Area Under Time`) over chronological accuracy,
-- evaluation log + `FIGURES_DIR/performance_decay.png`.
+It uses:
 
-## Security Notes
+- chronological train/validation/test splits,
+- accuracy, precision, recall, FPR,
+- dynamic threshold targeting `TARGET_FPR = 0.001`,
+- AUT (`Area Under Time`) over historical accuracy,
+- performance plot at `FIGURES_DIR/performance_decay.png`.
 
-- Do not execute downloaded binaries.
-- Run in isolated VM/container only.
-- Sandbox paths are used for downloaded samples.
-- Respect provider API limits and terms of service.
+Local default figure path:
+
+```text
+report/figures/performance_decay.png
+```
+
+Docker figure path:
+
+```text
+/data/figures/performance_decay.png
+```
+
+The LaTeX report references `figures/performance_decay.png` and will not fail if the plot is not generated yet.
 
 ## Tests
 
-```bash
-pytest tests/ -q
+Run:
+
+```powershell
+python -m pytest -q
 ```
+
+Fast static check:
+
+```powershell
+python -m compileall -q src tests
+```
+
+Docker config check:
+
+```powershell
+docker compose config
+```
+
+## Known Runtime Checklist
+
+Before a smooth run:
+
+- `.env` exists.
+- `MALWAREBAZAAR_AUTH_KEY` is set.
+- Docker Desktop is running if using Docker.
+- Ollama is reachable:
+
+```powershell
+curl.exe http://localhost:11434/api/tags
+```
+
+- `AMD_OLLAMA_MODEL` matches an installed Ollama model.
+- `AMD_CAPA_RULES_DIR` points to a real capa rules directory for local runs.
+- `data/benign` contains enough benign PE files, or live benign providers are reachable.
+- `python -m pytest -q` works after dependencies are installed.
+
+## Troubleshooting
+
+### `Missing MALWAREBAZAAR_AUTH_KEY`
+
+Create `.env` and set the key:
+
+```powershell
+copy .env.example .env
+```
+
+### Ollama model not found
+
+Either pull the configured model:
+
+```powershell
+ollama pull llama3.1:8b
+```
+
+Or set `.env` to an installed model:
+
+```env
+AMD_OLLAMA_MODEL=gemma4:latest
+```
+
+### Docker cannot connect
+
+Start Docker Desktop, then rerun:
+
+```powershell
+docker compose build
+```
+
+### capa rules missing locally
+
+Clone rules and set env:
+
+```powershell
+git clone https://github.com/mandiant/capa-rules.git C:\capa-rules
+$env:AMD_CAPA_RULES_DIR="C:\capa-rules"
+```
+
+### SQLite locked
+
+WAL mode is enabled. If locks persist, ensure ThreatIngestor and AMD-Agent point to same DB path and no long-lived manual SQLite shell holds a transaction.
+
+## Security Notes
+
+- Do not execute samples.
+- Use a VM or Docker.
+- Treat `data/sandbox` as malicious.
+- Keep MalwareBazaar and GitHub tokens private.
+- Respect source rate limits; Dynamic CTI includes query jitter and page-size truncation.

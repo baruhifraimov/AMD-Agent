@@ -3,7 +3,7 @@
 from unittest.mock import patch
 
 from src.sources.dynamic_cti import DynamicCTIProvider
-from src.tools.cti_search import extract_hash_contexts, is_public_url
+from src.tools.cti_search import extract_hash_contexts, fetch_public_text, is_public_url
 
 
 def test_extract_hash_contexts():
@@ -18,6 +18,18 @@ def test_is_public_url_blocks_local_ranges():
     assert not is_public_url("http://127.0.0.1/report")
     assert not is_public_url("http://192.168.1.10/report")
     assert not is_public_url("file:///tmp/report")
+
+
+def test_fetch_public_text_stream_truncates(httpx_mock, monkeypatch):
+    monkeypatch.setattr("src.tools.cti_search.CTI_PAGE_MAX_BYTES", 32)
+    httpx_mock.add_response(
+        url="https://example.com/big",
+        content=b"<html><body>" + b"a" * 1024 + b"</body></html>",
+    )
+
+    text = fetch_public_text("https://example.com/big")
+
+    assert len(text) <= 32
 
 
 @patch("src.sources.dynamic_cti.mb.is_pe_hash", return_value=True)
@@ -52,3 +64,13 @@ def test_dynamic_cti_discovers_hash_only_candidate(
     assert candidates[0].provider == "dynamic_cti"
     assert candidates[0].download_ref["sha256"] == sha
     assert candidates[0].metadata["origin_url"] == "https://example.com/cti"
+
+
+@patch("src.sources.dynamic_cti.time.sleep")
+@patch("src.sources.dynamic_cti.web_search", return_value=[])
+@patch("src.sources.dynamic_cti.generate_cti_queries", return_value=["q1", "q2", "q3"])
+def test_dynamic_cti_jitters_between_queries(mock_queries, mock_search, mock_sleep):
+    DynamicCTIProvider().discover(limit=1)
+
+    assert mock_sleep.call_count == 2
+    mock_sleep.assert_any_call(2.0)
