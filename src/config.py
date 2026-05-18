@@ -40,6 +40,14 @@ MIN_BENIGN_FOR_FPR = 10
 TARGET_MALWARE_BENIGN_RATIO = 10.0
 BENIGN_PROVIDER_NAMES = ("sysinternals", "github")
 ALLOW_LOCAL_BENIGN_ENV = "AMD_ALLOW_LOCAL_BENIGN"
+THREAT_QUEUE_ENABLED_ENV = "AMD_THREAT_QUEUE_ENABLED"
+
+
+def threat_queue_enabled() -> bool:
+    return os.getenv(THREAT_QUEUE_ENABLED_ENV, "1").strip() not in ("0", "false", "no")
+
+
+THREAT_QUEUE_ENABLED = threat_queue_enabled()
 
 # Sysinternals benign source
 SYSINTERNALS_BASE_URLS = (

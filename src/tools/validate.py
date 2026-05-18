@@ -17,6 +17,6 @@ def is_pe_mz(path: str | Path) -> bool:
 
 
 def is_duplicate(sha256: str, tracker: db.MalwareTracker | None = None) -> bool:
-    """Return True if SHA256 already exists in tracker DB."""
+    """Return True if SHA256 is already downloaded (pending rows are not duplicates)."""
     store = tracker or db.get_tracker()
-    return store.hash_exists(sha256)
+    return store.is_downloaded(sha256)

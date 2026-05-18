@@ -59,6 +59,78 @@ class MalwareTracker:
             ).fetchone()
         return row is not None
 
+    def is_downloaded(self, sha256: str) -> bool:
+        """True when sample exists and has a non-empty file_path on disk."""
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT 1 FROM samples
+                WHERE sha256 = ?
+                  AND file_path IS NOT NULL
+                  AND file_path != ''
+                """,
+                (sha256.lower(),),
+            ).fetchone()
+        return row is not None
+
+    def is_pending(self, sha256: str) -> bool:
+        """True when row exists but file_path is empty (ThreatIngestor queue)."""
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT 1 FROM samples
+                WHERE sha256 = ?
+                  AND (file_path IS NULL OR file_path = '')
+                """,
+                (sha256.lower(),),
+            ).fetchone()
+        return row is not None
+
+    def fetch_pending_hashes(self, limit: int = 10) -> list[dict[str, Any]]:
+        """Hashes from ThreatIngestor not yet downloaded (oldest first)."""
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT sha256, acquired_at FROM samples
+                WHERE (file_path IS NULL OR file_path = '')
+                  AND label = 1
+                ORDER BY acquired_at ASC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+        return [
+            {"sha256": str(r["sha256"]).lower(), "acquired_at": r["acquired_at"]}
+            for r in rows
+        ]
+
+    def insert_pending_hash(
+        self,
+        sha256: str,
+        acquired_at: str | None = None,
+        *,
+        label: int = 1,
+    ) -> None:
+        """Insert a ThreatIngestor hash awaiting download (no overwrite if exists)."""
+        acquired = acquired_at or self.utc_now_iso()
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO samples
+                (sha256, file_path, acquired_at, features_json, label, prediction, anomaly_score)
+                VALUES (?, '', ?, NULL, ?, NULL, NULL)
+                """,
+                (sha256.lower(), acquired, label),
+            )
+
+    def update_file_path(self, sha256: str, file_path: str) -> None:
+        """Set sandbox path after download for a pending row."""
+        with self._connect() as conn:
+            conn.execute(
+                "UPDATE samples SET file_path = ? WHERE sha256 = ?",
+                (file_path, sha256.lower()),
+            )
+
     def insert_sample(
         self,
         sha256: str,

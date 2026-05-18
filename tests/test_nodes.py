@@ -35,6 +35,23 @@ def test_data_validation_malware_label(tmp_paths, minimal_pe_path):
     assert any(r["sha256"] == sha and r["label"] == 1 for r in rows)
 
 
+def test_data_validation_updates_pending_row(tmp_paths, minimal_pe_path):
+    sha = minimal_pe_path.sha256
+    tracker = tmp_paths["tracker"]
+    tracker.insert_pending_hash(sha, "2024-01-01 00:00:00")
+    state = AgentState(
+        downloaded_paths=[str(minimal_pe_path.path)],
+        expected_label=1,
+        hash_metadata={sha: {"first_seen": "2024-01-01 00:00:00", "expected_label": 1}},
+    )
+    out = data_validation(state)
+    assert len(out["downloaded_paths"]) == 1
+    rows = tracker.fetch_chronological()
+    row = next(r for r in rows if r["sha256"] == sha)
+    assert row["file_path"] == str(minimal_pe_path.path)
+    assert row["acquired_at"] == "2024-01-01 00:00:00"
+
+
 def test_drift_monitor_no_drift(tmp_paths):
     state = AgentState(
         feature_vectors=[{"sha256": "a" * 64, "avg_section_entropy": 0.5}],

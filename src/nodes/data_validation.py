@@ -33,7 +33,13 @@ def data_validation(state: AgentState) -> dict:
         meta = state.hash_metadata.get(sha, {})
         acquired = meta.get("first_seen") or db.MalwareTracker.utc_now_iso()
         label = int(meta.get("expected_label", state.expected_label))
-        tracker.insert_sample(sha, path, acquired, label=label)
+
+        if tracker.is_pending(sha):
+            tracker.update_file_path(sha, path)
+            logger.info("Updated pending row with file_path: %s", sha)
+        else:
+            tracker.insert_sample(sha, path, acquired, label=label)
+
         valid_paths.append(path)
         valid_hashes.append(sha)
 

@@ -29,6 +29,8 @@ def test_is_duplicate(tmp_paths):
     tracker = MalwareTracker(tmp_paths["db"])
     sha = "a" * 64
     assert not is_duplicate(sha, tracker)
+    tracker.insert_pending_hash(sha)
+    assert not is_duplicate(sha, tracker)
     tracker.insert_sample(sha, "/tmp/x", "2020-01-01", label=1)
     assert is_duplicate(sha, tracker)
 

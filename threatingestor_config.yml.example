@@ -1,0 +1,31 @@
+# ThreatIngestor integration template for AMD-Agent (Option A)
+# Install: pip install threatingestor
+# Run in background: threatingestor -c threatingestor_config.yml
+#
+# Adjust plugin keys to match your ThreatIngestor version:
+# https://github.com/InQuest/threatingestor
+
+sources:
+  - name: rss_unit42
+    module: rss
+    url: https://unit42.paloaltonetworks.com/feed/
+
+  # Example Twitter (requires API credentials in ThreatIngestor env):
+  # - name: twitter_infosec
+  #   module: twitter
+  #   q: malware sha256
+
+operators:
+  - name: sqlite_pending_queue
+    module: sqlite
+    # Local dev path (use /data/malware_tracker.db in Docker)
+    database: data/malware_tracker.db
+    table: samples
+    # Map extracted hash to AMD-Agent pending row contract:
+    # - file_path must be empty string for LangGraph threat_queue node
+    # - label 1 = malware
+    columns:
+      sha256: "{sha256}"
+      acquired_at: "{published}"
+      label: 1
+      file_path: ""

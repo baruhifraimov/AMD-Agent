@@ -14,6 +14,7 @@ from src.nodes import (
     active_learning_explain,
     binary_fetch,
     classifier_inference,
+    consume_threatingestor_queue,
     data_validation,
     drift_monitor,
     feature_extraction,
@@ -43,11 +44,24 @@ def route_after_drift(state: AgentState) -> Literal["inference", "retrain"]:
     return "retrain" if state.drift_detected else "inference"
 
 
+def route_after_selector(state: AgentState) -> Literal["benign_discovery", "malware_queue"]:
+    if state.expected_label == 0:
+        return "benign_discovery"
+    return "malware_queue"
+
+
+def route_after_threat_queue(state: AgentState) -> Literal["binary_fetch", "source_discovery"]:
+    if state.sample_candidates:
+        return "binary_fetch"
+    return "source_discovery"
+
+
 def build_graph():
     """Build and compile the agent StateGraph."""
     graph = StateGraph(AgentState)
 
     graph.add_node("source_selector", _wrap(source_selector))
+    graph.add_node("threat_queue", _wrap(consume_threatingestor_queue))
     graph.add_node("source_discovery", _wrap(source_discovery))
     graph.add_node("binary_fetch", _wrap(binary_fetch))
     graph.add_node("data_validation", _wrap(data_validation))
@@ -58,7 +72,22 @@ def build_graph():
     graph.add_node("model_retrain", _wrap(model_retrain))
 
     graph.add_edge(START, "source_selector")
-    graph.add_edge("source_selector", "source_discovery")
+    graph.add_conditional_edges(
+        "source_selector",
+        route_after_selector,
+        {
+            "benign_discovery": "source_discovery",
+            "malware_queue": "threat_queue",
+        },
+    )
+    graph.add_conditional_edges(
+        "threat_queue",
+        route_after_threat_queue,
+        {
+            "binary_fetch": "binary_fetch",
+            "source_discovery": "source_discovery",
+        },
+    )
     graph.add_edge("source_discovery", "binary_fetch")
     graph.add_edge("binary_fetch", "data_validation")
     graph.add_edge("data_validation", "feature_extraction")

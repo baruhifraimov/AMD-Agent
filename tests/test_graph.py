@@ -2,7 +2,12 @@
 
 from unittest.mock import MagicMock, patch
 
-from src.graph import build_graph, route_after_drift
+from src.graph import (
+    build_graph,
+    route_after_drift,
+    route_after_selector,
+    route_after_threat_queue,
+)
 from src.sources.base import SampleCandidate
 from src.state import AgentState
 
@@ -12,35 +17,43 @@ def test_route_after_drift():
     assert route_after_drift(AgentState(drift_detected=True)) == "retrain"
 
 
+def test_route_after_selector():
+    assert route_after_selector(AgentState(expected_label=0)) == "benign_discovery"
+    assert route_after_selector(AgentState(expected_label=1)) == "malware_queue"
+
+
+def test_route_after_threat_queue():
+    assert route_after_threat_queue(AgentState(sample_candidates=[])) == "source_discovery"
+    assert route_after_threat_queue(AgentState(sample_candidates=[{"x": 1}])) == "binary_fetch"
+
+
 @patch("src.nodes.source_selector.choose_provider")
+@patch("src.nodes.binary_fetch.get_registry")
 @patch("src.nodes.source_discovery.get_registry")
 @patch("src.nodes.feature_extraction.extract_pe_features")
-def test_graph_no_drift_path(
+def test_graph_malware_pending_queue_path(
     mock_feats,
-    mock_registry,
+    mock_discovery_registry,
+    mock_fetch_registry,
     mock_choose,
     tmp_paths,
     minimal_pe_path,
 ):
     sha = minimal_pe_path.sha256
+    tracker = tmp_paths["tracker"]
+    tracker.insert_pending_hash(sha, "2024-01-01")
+
     mock_provider = MagicMock()
     mock_provider.name = "malwarebazaar"
     mock_provider.expected_label = 1
-    mock_provider.discover.return_value = [
-        SampleCandidate(
-            external_id=sha,
-            provider="malwarebazaar",
-            expected_label=1,
-            download_ref={"sha256": sha},
-            metadata={"first_seen": "2024-01-01"},
-        )
-    ]
+    mock_provider.discover.return_value = []
     mock_provider.download.return_value = minimal_pe_path.path.read_bytes()
     mock_choose.return_value = mock_provider
 
     mock_reg = MagicMock()
     mock_reg.get.return_value = mock_provider
-    mock_registry.return_value = mock_reg
+    mock_discovery_registry.return_value = mock_reg
+    mock_fetch_registry.return_value = mock_reg
 
     mock_feats.return_value = {
         "sha256": sha,
@@ -66,3 +79,4 @@ def test_graph_no_drift_path(
     final = AgentState.model_validate(result)
     assert final.source_type == "malwarebazaar"
     assert sha in final.discovered_hashes or len(final.feature_vectors) >= 0
+    assert tracker.is_downloaded(sha)
