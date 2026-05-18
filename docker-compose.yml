@@ -1,0 +1,18 @@
+services:
+  amd-agent:
+    build: .
+    env_file:
+      - .env
+    environment:
+      AMD_AGENT_CONTAINER: "1"
+    volumes:
+      - ./data:/data
+      - ./data/benign:/data/benign:ro
+    cap_add:
+      - NET_ADMIN
+    networks:
+      - malware_net
+
+networks:
+  malware_net:
+    driver: bridge

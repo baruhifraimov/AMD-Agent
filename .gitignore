@@ -1,0 +1,11 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.env
+data/sandbox/*.bin
+data/malware_tracker.db
+data/models/*.pkl
+data/models/*.joblib
+data/evaluation_log.jsonl
+.DS_Store

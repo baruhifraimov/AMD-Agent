@@ -1,0 +1,68 @@
+"""Tests for MalwareBazaar tools and validation."""
+
+from pathlib import Path
+
+import httpx
+import pytest
+
+from src.tools.fetch import save_pe_to_sandbox
+from src.tools.malwarebazaar import get_recent_pe, is_pe_sample, download_sample
+from src.tools.validate import is_duplicate, is_pe_mz
+from src.db.tracker import MalwareTracker
+
+
+def test_is_pe_sample_filters():
+    assert is_pe_sample({"file_type_mime": "application/x-dosexec"})
+    assert is_pe_sample({"magika": "pebin"})
+    assert is_pe_sample({"file_type": "exe"})
+    assert not is_pe_sample({"file_type": "elf"})
+
+
+def test_is_pe_mz(minimal_pe_path):
+    assert is_pe_mz(minimal_pe_path.path)
+    bad = minimal_pe_path.path.parent / "bad.bin"
+    bad.write_bytes(b"XX")
+    assert not is_pe_mz(bad)
+
+
+def test_is_duplicate(tmp_paths):
+    tracker = MalwareTracker(tmp_paths["db"])
+    sha = "a" * 64
+    assert not is_duplicate(sha, tracker)
+    tracker.insert_sample(sha, "/tmp/x", "2020-01-01", label=1)
+    assert is_duplicate(sha, tracker)
+
+
+def test_save_pe_to_sandbox(tmp_paths):
+    sha = "b" * 64
+    path = save_pe_to_sandbox(sha, b"MZ\x00")
+    assert path.endswith(".bin")
+    assert Path(path).read_bytes()[:2] == b"MZ"
+
+
+def test_get_recent_pe_mock(httpx_mock, tmp_paths):
+    payload = {
+        "query_status": "ok",
+        "data": [
+            {"sha256_hash": "a" * 64, "file_type_mime": "application/x-dosexec"},
+            {"sha256_hash": "b" * 64, "file_type": "elf"},
+        ],
+    }
+    httpx_mock.add_response(
+        method="POST",
+        url="https://mb-api.abuse.ch/api/v1/",
+        json=payload,
+    )
+    samples = get_recent_pe(limit=10)
+    assert len(samples) == 1
+
+
+def test_download_sample_zip_response(httpx_mock, infected_zip_bytes, tmp_paths):
+    httpx_mock.add_response(
+        method="POST",
+        url="https://mb-api.abuse.ch/api/v1/",
+        content=infected_zip_bytes,
+        headers={"content-type": "application/zip"},
+    )
+    raw = download_sample("c" * 64)
+    assert raw[:2] == b"MZ"

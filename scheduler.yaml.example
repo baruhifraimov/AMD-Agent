@@ -1,0 +1,8 @@
+# Optional scheduler overrides (use: python -m src.graph --daemon --config scheduler.yaml)
+enabled: true
+interval_seconds: 1800
+max_runs: null
+run_on_start: true
+jitter_seconds: 60
+error_backoff_seconds: 60
+max_backoff_seconds: 3600
