@@ -26,6 +26,12 @@ def _shannon_entropy(data: bytes) -> float:
 
 def extract_pe_features(path: str | Path) -> dict[str, Any] | None:
     """Extract 15 structural PE features. Returns None on parse failure."""
+    features, _ = extract_pe_features_with_error(path)
+    return features
+
+
+def extract_pe_features_with_error(path: str | Path) -> tuple[dict[str, Any] | None, str | None]:
+    """Extract PE features and preserve raw pefile/feature errors for agent triage."""
     path = Path(path)
     try:
         pe = pefile.PE(str(path), fast_load=True)
@@ -36,7 +42,7 @@ def extract_pe_features(path: str | Path) -> dict[str, Any] | None:
         )
     except Exception as exc:
         logger.warning("pefile parse failed for %s: %s", path, exc)
-        return None
+        return None, str(exc)
 
     try:
         dos_header_size = int(pe.DOS_HEADER.e_cblp)
@@ -92,14 +98,14 @@ def extract_pe_features(path: str | Path) -> dict[str, Any] | None:
             "sha256": path.stem if len(path.stem) == 64 else "",
         }
         pe.close()
-        return features
+        return features, None
     except Exception as exc:
         logger.warning("feature extraction failed for %s: %s", path, exc)
         try:
             pe.close()
         except Exception:
             pass
-        return None
+        return None, str(exc)
 
 
 def features_to_vector(features: dict[str, Any]) -> np.ndarray:

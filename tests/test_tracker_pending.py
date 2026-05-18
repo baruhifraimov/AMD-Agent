@@ -31,3 +31,14 @@ def test_insert_pending_hash_idempotent(tmp_paths):
     pending = tracker.fetch_pending_hashes()
     assert len(pending) == 1
     assert pending[0]["acquired_at"] == "2024-01-01"
+
+
+def test_mark_corrupted_removes_from_pending_queue(tmp_paths):
+    tracker = tmp_paths["tracker"]
+    sha = "f" * 64
+    tracker.insert_pending_hash(sha, "2024-01-01")
+    tracker.mark_corrupted(sha, "pefile parse failed")
+    assert tracker.fetch_pending_hashes() == []
+    row = next(r for r in tracker.fetch_chronological() if r["sha256"] == sha)
+    assert row["status"] == "corrupted"
+    assert row["reject_reason"] == "pefile parse failed"

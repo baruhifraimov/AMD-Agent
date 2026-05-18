@@ -25,6 +25,14 @@ def data_validation(state: AgentState) -> dict:
             continue
         if not is_pe_mz(path):
             logger.warning("MZ check failed: %s", sha)
+            meta = state.hash_metadata.get(sha, {})
+            tracker.mark_corrupted(
+                sha,
+                "MZ signature check failed",
+                file_path=path,
+                acquired_at=meta.get("first_seen"),
+                label=int(meta.get("expected_label", state.expected_label)),
+            )
             continue
         if is_duplicate(sha, tracker):
             logger.info("Duplicate hash skipped: %s", sha)

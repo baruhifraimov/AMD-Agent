@@ -24,8 +24,10 @@ operators:
     # Map extracted hash to AMD-Agent pending row contract:
     # - file_path must be empty string for LangGraph threat_queue node
     # - label 1 = malware
+    # - status pending keeps the row eligible; corrupted rows are skipped
     columns:
       sha256: "{sha256}"
       acquired_at: "{published}"
       label: 1
       file_path: ""
+      status: "pending"

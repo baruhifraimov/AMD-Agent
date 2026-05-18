@@ -21,7 +21,7 @@ Autonomous LangGraph agent for MalwareBazaar PE ingestion, static feature extrac
 The pipeline uses LangGraph with a Pydantic \texttt{AgentState}. Static features are extracted via \texttt{pefile}; concept drift is monitored with River ADWIN on mean section entropy. LightGBM provides maliciousness scores with ROC-tuned thresholds targeting FPR $\leq 0.1\%$. On drift, MADAR exact-replay (80\% core / 20\% outlier via Isolation Forest) retrains the classifier. Evaluation follows TESSERACT chronological splits (no random holdout).
 
 \section{Results}
-% \includegraphics[width=0.8\textwidth]{figures/performance_decay.png}
+\includegraphics[width=0.8\textwidth]{figures/performance_decay.png}
 
 \section{Discussion}
 Area Under Time (AUT) summarizes recovery after each MADAR retraining iteration.

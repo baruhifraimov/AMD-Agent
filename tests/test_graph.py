@@ -30,7 +30,7 @@ def test_route_after_threat_queue():
 @patch("src.nodes.source_selector.choose_provider")
 @patch("src.nodes.binary_fetch.get_registry")
 @patch("src.nodes.source_discovery.get_registry")
-@patch("src.nodes.feature_extraction.extract_pe_features")
+@patch("src.nodes.feature_extraction.extract_pe_features_with_error")
 def test_graph_malware_pending_queue_path(
     mock_feats,
     mock_discovery_registry,
@@ -55,27 +55,33 @@ def test_graph_malware_pending_queue_path(
     mock_discovery_registry.return_value = mock_reg
     mock_fetch_registry.return_value = mock_reg
 
-    mock_feats.return_value = {
-        "sha256": sha,
-        "avg_section_entropy": 0.3,
-        "dos_header_size": 1,
-        "pe_header_offset": 2,
-        "rich_header_present": 0,
-        "rich_entropy": 0,
-        "num_sections": 1,
-        "max_section_entropy": 0.5,
-        "num_imported_dlls": 0,
-        "num_imported_apis": 0,
-        "has_exec_apis": 0,
-        "image_size": 1,
-        "entry_point": 1,
-        "subsystem": 1,
-        "dll_characteristics": 0,
-        "timestamp": 0,
-    }
+    mock_feats.return_value = (
+        {
+            "sha256": sha,
+            "avg_section_entropy": 0.3,
+            "dos_header_size": 1,
+            "pe_header_offset": 2,
+            "rich_header_present": 0,
+            "rich_entropy": 0,
+            "num_sections": 1,
+            "max_section_entropy": 0.5,
+            "num_imported_dlls": 0,
+            "num_imported_apis": 0,
+            "has_exec_apis": 0,
+            "image_size": 1,
+            "entry_point": 1,
+            "subsystem": 1,
+            "dll_characteristics": 0,
+            "timestamp": 0,
+        },
+        None,
+    )
 
     graph = build_graph()
-    result = graph.invoke(AgentState())
+    result = graph.invoke(
+        AgentState(),
+        config={"configurable": {"thread_id": "test-graph-pending"}},
+    )
     final = AgentState.model_validate(result)
     assert final.source_type == "malwarebazaar"
     assert sha in final.discovered_hashes or len(final.feature_vectors) >= 0

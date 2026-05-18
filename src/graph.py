@@ -7,6 +7,7 @@ import logging
 from pathlib import Path
 from typing import Literal
 
+from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, START, StateGraph
 
 from src.config import ensure_dirs
@@ -54,6 +55,10 @@ def route_after_threat_queue(state: AgentState) -> Literal["binary_fetch", "sour
     if state.sample_candidates:
         return "binary_fetch"
     return "source_discovery"
+
+
+DEFAULT_THREAD_ID = "amd-agent-default"
+_CHECKPOINTER = MemorySaver()
 
 
 def build_graph():
@@ -104,14 +109,17 @@ def build_graph():
     graph.add_edge("active_learning_explain", "model_retrain")
     graph.add_edge("model_retrain", END)
 
-    return graph.compile()
+    return graph.compile(checkpointer=_CHECKPOINTER)
 
 
 def run_pipeline() -> AgentState:
     """Execute one full graph pass."""
     ensure_dirs()
     graph = build_graph()
-    result = graph.invoke(AgentState())
+    result = graph.invoke(
+        AgentState(),
+        config={"configurable": {"thread_id": DEFAULT_THREAD_ID}},
+    )
     final = AgentState.model_validate(result)
     logger.info(
         "Run complete: source=%s label=%d hashes=%d predictions=%d drift=%s",
@@ -125,11 +133,12 @@ def run_pipeline() -> AgentState:
         logger.info("Report: %s", final.semantic_report)
 
     try:
-        from src.evaluation import append_eval_log, run_tesseract_eval
+        from src.evaluation import append_eval_log, plot_performance_decay, run_tesseract_eval
 
         metrics = run_tesseract_eval()
         if metrics:
             append_eval_log(metrics)
+            plot_performance_decay()
             logger.info("TESSERACT eval: %s", metrics)
     except Exception as exc:
         logger.debug("Post-run eval skipped: %s", exc)

@@ -14,7 +14,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from sklearn.metrics import accuracy_score, precision_recall_fscore_support
 
-from src.config import EVAL_LOG_PATH, FIGURES_DIR, TARGET_FPR, ensure_dirs
+import src.config as cfg
 import src.db.tracker as db
 from src.ml.classifier import fit_threshold, load_bundle, predict_proba
 from src.ml.features import features_to_vector
@@ -66,20 +66,20 @@ def run_tesseract_eval(
         return {}
 
     model = bundle["model"]
-    train_scores = predict_proba(model, X[:train_end])
     threshold = fit_threshold(y[train_end:val_end], predict_proba(model, X[train_end:val_end]))
     test_scores = predict_proba(model, X[val_end:])
     y_test = y[val_end:]
     y_pred = (test_scores >= threshold).astype(int)
     metrics = compute_metrics(y_test, y_pred)
     metrics["threshold"] = threshold
-    metrics["target_fpr"] = TARGET_FPR
+    metrics["target_fpr"] = cfg.TARGET_FPR
+    metrics["aut"] = compute_aut(_historical_metric_values("accuracy") + [metrics["accuracy"]])
     return metrics
 
 
 def append_eval_log(metrics: dict[str, float], path: Path | None = None) -> None:
-    ensure_dirs()
-    p = path or EVAL_LOG_PATH
+    cfg.ensure_dirs()
+    p = path or cfg.EVAL_LOG_PATH
     record = {"metrics": metrics}
     with p.open("a") as f:
         f.write(json.dumps(record) + "\n")
@@ -87,9 +87,9 @@ def append_eval_log(metrics: dict[str, float], path: Path | None = None) -> None
 
 def plot_performance_decay(log_path: Path | None = None, out_path: Path | None = None) -> Path:
     """Plot accuracy/FPR over evaluation runs."""
-    ensure_dirs()
-    log_path = log_path or EVAL_LOG_PATH
-    out_path = out_path or FIGURES_DIR / "performance_decay.png"
+    cfg.ensure_dirs()
+    log_path = log_path or cfg.EVAL_LOG_PATH
+    out_path = out_path or cfg.FIGURES_DIR / "performance_decay.png"
     if not log_path.exists():
         return out_path
 
@@ -118,6 +118,23 @@ def plot_performance_decay(log_path: Path | None = None, out_path: Path | None =
     fig.savefig(out_path, dpi=120)
     plt.close(fig)
     return out_path
+
+
+def _historical_metric_values(metric_name: str, log_path: Path | None = None) -> list[float]:
+    log_path = log_path or cfg.EVAL_LOG_PATH
+    if not log_path.exists():
+        return []
+    values: list[float] = []
+    with log_path.open() as f:
+        for line in f:
+            try:
+                rec = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            value = rec.get("metrics", {}).get(metric_name)
+            if isinstance(value, (int, float)):
+                values.append(float(value))
+    return values
 
 
 def compute_aut(values: list[float]) -> float:

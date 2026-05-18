@@ -26,6 +26,7 @@ START → SourceSelector ─┬─ (benign) → SourceDiscovery → BinaryFetch
 ### Node-by-node behavior
 
 1. `SourceSelector`
+   - Uses Ollama tool binding when available, with deterministic fallback.
    - Chooses malware vs benign ingestion mode based on dataset balance in SQLite.
    - Helps ensure the model sees enough benign negatives for valid FPR tuning.
 
@@ -35,7 +36,7 @@ START → SourceSelector ─┬─ (benign) → SourceDiscovery → BinaryFetch
    - If queue is empty, falls back to live discovery from source APIs.
 
 3. `SourceDiscovery`
-   - Discovers candidate PE items from selected provider (MalwareBazaar, Sysinternals, GitHub releases).
+   - Discovers candidate PE items from selected provider(s): MalwareBazaar, Dynamic CTI, Sysinternals, GitHub releases.
 
 4. `BinaryFetch`
    - Downloads bytes using provider-specific logic.
@@ -57,7 +58,8 @@ START → SourceSelector ─┬─ (benign) → SourceDiscovery → BinaryFetch
    - Loads LightGBM model bundle, predicts malicious probabilities, tracks threshold/FPR metrics.
 
 9. `ActiveLearningExplain` + `ModelRetrain` (drift)
-   - Produces drift report stub and retrains using MADAR-style replay:
+   - Runs Mandiant capa with an explicit rules directory and asks Ollama to summarize drift capabilities.
+   - Retrains using MADAR-style replay:
      - IsolationForest sampling,
      - 80/20 core/outlier replay split,
      - retrain LightGBM and persist updated model.
@@ -69,6 +71,10 @@ START → SourceSelector ─┬─ (benign) → SourceDiscovery → BinaryFetch
   - `get_recent` for live discovery
   - `get_file` for SHA256-based sample retrieval
   - password-protected ZIP extraction (`infected`)
+
+- **Dynamic CTI discovery**
+  - Uses DuckDuckGo search and public CTI page text to discover SHA256 indicators.
+  - Hybrid Strict policy: CTI pages provide evidence only; binary downloads still go through registered providers.
 
 ### Benign sources
 - **Sysinternals live directory**
@@ -86,7 +92,9 @@ START → SourceSelector ─┬─ (benign) → SourceDiscovery → BinaryFetch
 
 ### Core orchestration and state
 - `langgraph` — workflow graph and conditional routing
+- LangGraph `MemorySaver` checkpointer for in-process state persistence
 - `pydantic` — strict state/config models
+- `langchain-ollama` — local Ollama tool binding and report generation
 
 ### Networking and parsing
 - `httpx` — API/HTTP client
@@ -103,6 +111,7 @@ START → SourceSelector ─┬─ (benign) → SourceDiscovery → BinaryFetch
 ### Storage, evaluation, runtime
 - `sqlite3` — persistent sample tracker (`malware_tracker.db`)
 - `matplotlib` — temporal performance plots
+- `flare-capa` + `capa-rules` — malware capability extraction during drift explanation
 - custom scheduler loop (`--daemon`) + YAML/env configuration
 
 ### Environment and operations
@@ -143,6 +152,11 @@ python -m src.graph --daemon --config scheduler.yaml
 | `AMD_BENIGN_PROVIDER` | Force benign provider (`sysinternals` or `github`) |
 | `AMD_ALLOW_LOCAL_BENIGN` | Optional local benign fallback |
 | `AMD_THREAT_QUEUE_ENABLED` | Enable ThreatIngestor pending queue consumption |
+| `AMD_OLLAMA_ENABLED` | Enable Ollama decisions/summaries (`0` disables) |
+| `AMD_OLLAMA_BASE_URL` | Ollama endpoint |
+| `AMD_OLLAMA_MODEL` | Local Ollama model name |
+| `AMD_CAPA_RULES_DIR` | capa rules directory passed with `capa -r` |
+| `AMD_REPORT_LANGUAGE` | Language for LLM drift report |
 
 ## ThreatIngestor Integration (Option A)
 
@@ -166,6 +180,7 @@ Pending row contract in SQLite:
 | `file_path` | empty string (`''`) |
 | `label` | `1` |
 | `acquired_at` | timestamp |
+| `status` | `pending` for queued rows; `corrupted` rows are skipped |
 
 ## Evaluation
 
@@ -173,7 +188,8 @@ Temporal (TESSERACT-style) evaluation is provided in `src/evaluation/tesseract.p
 
 - chronological splits (train/val/test by time),
 - metrics: accuracy, precision, recall, FPR,
-- evaluation log + performance decay plots.
+- AUT (`Area Under Time`) over chronological accuracy,
+- evaluation log + `FIGURES_DIR/performance_decay.png`.
 
 ## Security Notes
 

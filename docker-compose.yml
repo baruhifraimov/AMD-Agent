@@ -2,14 +2,19 @@ services:
   amd-agent:
     build: .
     env_file:
-      - .env
+      - path: .env
+        required: false
     environment:
       AMD_AGENT_CONTAINER: "1"
+      AMD_OLLAMA_BASE_URL: "http://host.docker.internal:11434"
+      AMD_CAPA_RULES_DIR: "/opt/capa-rules"
     volumes:
       - ./data:/data
       - ./data/benign:/data/benign:ro
     cap_add:
       - NET_ADMIN
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     networks:
       - malware_net
 

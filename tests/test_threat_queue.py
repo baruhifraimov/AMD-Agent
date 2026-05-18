@@ -20,3 +20,12 @@ def test_consume_pending_hashes(tmp_paths):
     cand = out["sample_candidates"][0]
     assert cand["download_ref"]["sha256"] == sha
     assert cand["metadata"]["discovery_source"] == "threatingestor"
+
+
+def test_consume_skips_corrupted_hashes(tmp_paths):
+    tracker = tmp_paths["tracker"]
+    sha = "e" * 64
+    tracker.insert_pending_hash(sha, "2024-02-01 12:00:00")
+    tracker.mark_corrupted(sha, "bad PE")
+    out = consume_threatingestor_queue(AgentState())
+    assert out["sample_candidates"] == []

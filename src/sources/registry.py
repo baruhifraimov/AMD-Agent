@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from src.sources.base import PESourceProvider
+from src.sources.dynamic_cti import DynamicCTIProvider
 from src.sources.github_releases import GitHubReleasesProvider
 from src.sources.malwarebazaar import MalwareBazaarProvider
 from src.sources.sysinternals import SysinternalsProvider
@@ -30,6 +31,7 @@ class SourceRegistry:
 def build_default_registry() -> SourceRegistry:
     registry = SourceRegistry()
     registry.register(MalwareBazaarProvider())
+    registry.register(DynamicCTIProvider())
     registry.register(SysinternalsProvider())
     registry.register(GitHubReleasesProvider())
     return registry

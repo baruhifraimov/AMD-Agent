@@ -41,6 +41,11 @@ TARGET_MALWARE_BENIGN_RATIO = 10.0
 BENIGN_PROVIDER_NAMES = ("sysinternals", "github")
 ALLOW_LOCAL_BENIGN_ENV = "AMD_ALLOW_LOCAL_BENIGN"
 THREAT_QUEUE_ENABLED_ENV = "AMD_THREAT_QUEUE_ENABLED"
+OLLAMA_BASE_URL_ENV = "AMD_OLLAMA_BASE_URL"
+OLLAMA_MODEL_ENV = "AMD_OLLAMA_MODEL"
+OLLAMA_TIMEOUT_ENV = "AMD_OLLAMA_TIMEOUT"
+CAPA_RULES_DIR_ENV = "AMD_CAPA_RULES_DIR"
+REPORT_LANGUAGE_ENV = "AMD_REPORT_LANGUAGE"
 
 
 def threat_queue_enabled() -> bool:
@@ -48,6 +53,19 @@ def threat_queue_enabled() -> bool:
 
 
 THREAT_QUEUE_ENABLED = threat_queue_enabled()
+
+# Local LLM / explainability
+OLLAMA_BASE_URL = os.getenv(OLLAMA_BASE_URL_ENV, "http://localhost:11434").strip()
+OLLAMA_MODEL = os.getenv(OLLAMA_MODEL_ENV, "llama3.1:8b").strip()
+OLLAMA_TIMEOUT = float(os.getenv(OLLAMA_TIMEOUT_ENV, "8"))
+CAPA_RULES_DIR = Path(os.getenv(CAPA_RULES_DIR_ENV, "/opt/capa-rules")).expanduser()
+REPORT_LANGUAGE = os.getenv(REPORT_LANGUAGE_ENV, "English").strip() or "English"
+
+# Dynamic CTI discovery limits
+CTI_SEARCH_LIMIT = int(os.getenv("AMD_CTI_SEARCH_LIMIT", "5"))
+CTI_PAGE_LIMIT = int(os.getenv("AMD_CTI_PAGE_LIMIT", "5"))
+CTI_PAGE_MAX_BYTES = int(os.getenv("AMD_CTI_PAGE_MAX_BYTES", "250000"))
+CTI_REQUEST_TIMEOUT = float(os.getenv("AMD_CTI_REQUEST_TIMEOUT", "20"))
 
 # Sysinternals benign source
 SYSINTERNALS_BASE_URLS = (
