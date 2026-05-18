@@ -31,8 +31,8 @@ def binary_fetch(state: AgentState) -> dict:
                 logger.warning("Skipping non-PE download: %s", candidate.external_id)
                 continue
             sha = hashlib.sha256(content).hexdigest()
-            if tracker.hash_exists(sha):
-                logger.info("Duplicate content hash skipped: %s", sha)
+            if tracker.is_downloaded(sha):
+                logger.info("Already downloaded, skipping: %s", sha)
                 continue
             path = save_pe_to_sandbox(sha, content)
             paths.append(path)

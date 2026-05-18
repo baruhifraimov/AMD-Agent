@@ -9,9 +9,11 @@ from src.nodes.feature_extraction import feature_extraction
 from src.nodes.model_retrain import model_retrain
 from src.nodes.source_discovery import source_discovery
 from src.nodes.source_selector import source_selector
+from src.nodes.threat_queue import consume_threatingestor_queue
 
 __all__ = [
     "source_selector",
+    "consume_threatingestor_queue",
     "source_discovery",
     "binary_fetch",
     "data_validation",
