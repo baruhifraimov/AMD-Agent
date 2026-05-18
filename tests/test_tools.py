@@ -7,7 +7,7 @@ import pytest
 
 from src.tools.fetch import save_pe_to_sandbox
 from src.tools.malwarebazaar import get_recent_pe, is_pe_sample, download_sample
-from src.tools.validate import is_duplicate, is_pe_mz
+from src.tools.validate import file_sha256, is_duplicate, is_pe_mz, is_pe_signature
 from src.db.tracker import MalwareTracker
 
 
@@ -23,6 +23,17 @@ def test_is_pe_mz(minimal_pe_path):
     bad = minimal_pe_path.path.parent / "bad.bin"
     bad.write_bytes(b"XX")
     assert not is_pe_mz(bad)
+
+
+def test_is_pe_signature(minimal_pe_path):
+    assert is_pe_signature(minimal_pe_path.path)
+    mz_only = minimal_pe_path.path.parent / "mz_only.bin"
+    mz_only.write_bytes(b"MZ" + b"\x00" * 128)
+    assert not is_pe_signature(mz_only)
+
+
+def test_file_sha256_matches_path_stem(minimal_pe_path):
+    assert file_sha256(minimal_pe_path.path) == minimal_pe_path.sha256
 
 
 def test_is_duplicate(tmp_paths):

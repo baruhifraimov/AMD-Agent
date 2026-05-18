@@ -27,7 +27,7 @@ START
 - `ThreatQueue`: consumes pending hashes inserted by ThreatIngestor. Corrupted hashes are skipped.
 - `SourceDiscovery`: discovers samples from one or more registered providers.
 - `BinaryFetch`: downloads through each candidate's own provider, not a global provider.
-- `DataValidation`: checks MZ header, de-duplicates, and syncs SQLite status.
+- `DataValidation`: checks MZ header, validates `PE\0\0` at `e_lfanew`, verifies filename SHA256, de-duplicates, skips known corrupted hashes, and syncs SQLite status.
 - `FeatureExtraction`: extracts 15 PE features using `pefile`; parse failures are triaged and marked `corrupted`.
 - `DriftMonitor`: uses River ADWIN over section entropy.
 - `ClassifierInference`: scores samples with LightGBM and FPR-aware thresholding.

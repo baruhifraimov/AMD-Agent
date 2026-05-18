@@ -56,6 +56,44 @@ def test_data_validation_updates_pending_row(tmp_paths, minimal_pe_path):
     assert row["acquired_at"] == "2024-01-01 00:00:00"
 
 
+def test_data_validation_rejects_missing_pe_signature(tmp_paths, minimal_pe_path):
+    import hashlib
+
+    content = b"MZ" + b"\x00" * 128
+    sha = hashlib.sha256(content).hexdigest()
+    path = tmp_paths["sandbox"] / f"{sha}.bin"
+    path.write_bytes(content)
+
+    out = data_validation(AgentState(downloaded_paths=[str(path)]))
+
+    assert out["downloaded_paths"] == []
+    row = next(r for r in tmp_paths["tracker"].fetch_chronological() if r["sha256"] == sha)
+    assert row["status"] == "corrupted"
+    assert row["reject_reason"] == "PE signature check failed"
+
+
+def test_data_validation_rejects_sha_filename_mismatch(tmp_paths, minimal_pe_path):
+    wrong_sha = "0" * 64
+    wrong_path = tmp_paths["sandbox"] / f"{wrong_sha}.bin"
+    wrong_path.write_bytes(minimal_pe_path.path.read_bytes())
+
+    out = data_validation(AgentState(downloaded_paths=[str(wrong_path)]))
+
+    assert out["downloaded_paths"] == []
+    row = next(r for r in tmp_paths["tracker"].fetch_chronological() if r["sha256"] == wrong_sha)
+    assert row["status"] == "corrupted"
+    assert "SHA256 filename mismatch" in row["reject_reason"]
+
+
+def test_data_validation_skips_corrupted_hash(tmp_paths, minimal_pe_path):
+    tracker = tmp_paths["tracker"]
+    tracker.mark_corrupted(minimal_pe_path.sha256, "previous reject", file_path=str(minimal_pe_path.path))
+
+    out = data_validation(AgentState(downloaded_paths=[str(minimal_pe_path.path)]))
+
+    assert out["downloaded_paths"] == []
+
+
 def test_drift_monitor_no_drift(tmp_paths):
     state = AgentState(
         feature_vectors=[{"sha256": "a" * 64, "avg_section_entropy": 0.5}],

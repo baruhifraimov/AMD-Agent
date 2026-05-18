@@ -7,7 +7,7 @@ from pathlib import Path
 
 import src.db.tracker as db
 from src.state import AgentState
-from src.tools.validate import is_duplicate, is_pe_mz
+from src.tools.validate import file_sha256, is_duplicate, is_pe_mz, is_pe_signature
 
 logger = logging.getLogger(__name__)
 
@@ -23,12 +23,38 @@ def data_validation(state: AgentState) -> dict:
         if len(sha) != 64:
             logger.warning("Skipping invalid path stem: %s", path)
             continue
+        if tracker.is_corrupted(sha):
+            logger.info("Skipping previously corrupted hash: %s", sha)
+            continue
         if not is_pe_mz(path):
             logger.warning("MZ check failed: %s", sha)
             meta = state.hash_metadata.get(sha, {})
             tracker.mark_corrupted(
                 sha,
                 "MZ signature check failed",
+                file_path=path,
+                acquired_at=meta.get("first_seen"),
+                label=int(meta.get("expected_label", state.expected_label)),
+            )
+            continue
+        if not is_pe_signature(path):
+            logger.warning("PE signature check failed: %s", sha)
+            meta = state.hash_metadata.get(sha, {})
+            tracker.mark_corrupted(
+                sha,
+                "PE signature check failed",
+                file_path=path,
+                acquired_at=meta.get("first_seen"),
+                label=int(meta.get("expected_label", state.expected_label)),
+            )
+            continue
+        actual_sha = file_sha256(path)
+        if actual_sha != sha:
+            logger.warning("SHA256 filename mismatch: path=%s expected=%s actual=%s", path, sha, actual_sha)
+            meta = state.hash_metadata.get(sha, {})
+            tracker.mark_corrupted(
+                sha,
+                f"SHA256 filename mismatch: actual={actual_sha}",
                 file_path=path,
                 acquired_at=meta.get("first_seen"),
                 label=int(meta.get("expected_label", state.expected_label)),

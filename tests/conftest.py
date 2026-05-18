@@ -12,6 +12,14 @@ import pytest
 from src.config import DB_PATH, MODEL_PATH, ADWIN_PATH, SANDBOX_DIR
 
 
+def minimal_pe_bytes() -> bytes:
+    content = bytearray(b"MZ" + b"\x00" * 126)
+    content[0x3C:0x40] = (0x80).to_bytes(4, "little")
+    content.extend(b"PE\x00\x00")
+    content.extend(b"\x00" * 64)
+    return bytes(content)
+
+
 @pytest.fixture
 def tmp_paths(tmp_path, monkeypatch):
     """Isolate DB, model, sandbox paths per test."""
@@ -46,7 +54,7 @@ def tmp_paths(tmp_path, monkeypatch):
 @pytest.fixture
 def infected_zip_bytes():
     """Create AES ZIP with password 'infected' containing fake PE bytes."""
-    pe = b"MZ" + b"\x00" * 64
+    pe = minimal_pe_bytes()
     buf = io.BytesIO()
     with pyzipper.AESZipFile(
         buf,
@@ -64,7 +72,7 @@ def minimal_pe_path(tmp_paths):
     import hashlib
     from types import SimpleNamespace
 
-    content = b"MZ" + b"\x00" * 128
+    content = minimal_pe_bytes()
     sha = hashlib.sha256(content).hexdigest()
     path = tmp_paths["sandbox"] / f"{sha}.bin"
     path.write_bytes(content)

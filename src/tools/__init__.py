@@ -8,7 +8,7 @@ from src.tools.malwarebazaar import (
     is_pe_hash,
     is_pe_sample,
 )
-from src.tools.validate import is_duplicate, is_pe_mz
+from src.tools.validate import file_sha256, is_duplicate, is_pe_mz, is_pe_signature
 
 __all__ = [
     "get_recent_pe",
@@ -17,6 +17,8 @@ __all__ = [
     "is_pe_hash",
     "is_pe_sample",
     "save_pe_to_sandbox",
+    "file_sha256",
     "is_pe_mz",
+    "is_pe_signature",
     "is_duplicate",
 ]
