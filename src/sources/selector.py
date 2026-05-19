@@ -8,7 +8,8 @@ import os
 import src.db.tracker as db
 from src.config import (
     BENIGN_PROVIDER_NAMES,
-    MIN_BENIGN_FOR_FPR,
+    MIN_TRAIN_BENIGN,
+    MIN_TRAIN_MALWARE,
     TARGET_MALWARE_BENIGN_RATIO,
 )
 from src.sources.base import PESourceProvider
@@ -30,12 +31,7 @@ def choose_provider(
     n_mal = counts.get(1, 0)
     n_ben = counts.get(0, 0)
 
-    need_benign = n_ben < MIN_BENIGN_FOR_FPR
-    if not need_benign and n_ben > 0:
-        ratio = n_mal / n_ben
-        need_benign = ratio > TARGET_MALWARE_BENIGN_RATIO
-
-    if need_benign:
+    if _next_label(n_mal, n_ben) == 0:
         provider = _choose_benign_provider(registry)
         logger.info(
             "Source selector: benign (%s) malware=%d benign=%d",
@@ -53,6 +49,24 @@ def choose_provider(
         n_ben,
     )
     return provider
+
+
+def _next_label(n_malware: int, n_benign: int) -> int:
+    """Return the class that is most underrepresented for balanced collection."""
+    malware_deficit = max(MIN_TRAIN_MALWARE - n_malware, 0)
+    benign_deficit = max(MIN_TRAIN_BENIGN - n_benign, 0)
+
+    if malware_deficit or benign_deficit:
+        return 0 if benign_deficit >= malware_deficit else 1
+
+    if n_benign == 0:
+        return 0
+    ratio = n_malware / n_benign
+    if ratio > TARGET_MALWARE_BENIGN_RATIO:
+        return 0
+    if ratio < TARGET_MALWARE_BENIGN_RATIO:
+        return 1
+    return 1
 
 
 def _choose_benign_provider(registry: SourceRegistry) -> PESourceProvider:

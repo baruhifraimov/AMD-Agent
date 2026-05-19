@@ -282,7 +282,11 @@ class MalwareTracker:
             rows = conn.execute(
                 """
                 SELECT * FROM samples
-                WHERE features_json IS NOT NULL AND label IS NOT NULL
+                WHERE features_json IS NOT NULL
+                  AND label IS NOT NULL
+                  AND file_path IS NOT NULL
+                  AND file_path != ''
+                  AND COALESCE(status, 'active') = 'active'
                 ORDER BY acquired_at ASC
                 """
             ).fetchall()
@@ -291,7 +295,15 @@ class MalwareTracker:
     def count_by_label(self) -> dict[int, int]:
         with self._connect() as conn:
             rows = conn.execute(
-                "SELECT label, COUNT(*) as cnt FROM samples WHERE label IS NOT NULL GROUP BY label"
+                """
+                SELECT label, COUNT(*) as cnt FROM samples
+                WHERE label IS NOT NULL
+                  AND features_json IS NOT NULL
+                  AND file_path IS NOT NULL
+                  AND file_path != ''
+                  AND COALESCE(status, 'active') = 'active'
+                GROUP BY label
+                """
             ).fetchall()
         return {int(r["label"]): int(r["cnt"]) for r in rows}
 

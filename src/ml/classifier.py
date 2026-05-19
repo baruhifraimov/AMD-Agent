@@ -40,11 +40,21 @@ def save_bundle(
     threshold: float,
     *,
     path: Path | None = None,
+    training_counts: dict[int, int] | None = None,
 ) -> None:
     ensure_dirs()
     p = path or MODEL_PATH
+    bundle: dict[str, Any] = {
+        "model": model,
+        "threshold": threshold,
+        "feature_names": FEATURE_NAMES,
+    }
+    if training_counts is not None:
+        bundle["training_counts"] = {
+            str(label): int(count) for label, count in training_counts.items()
+        }
     joblib.dump(
-        {"model": model, "threshold": threshold, "feature_names": FEATURE_NAMES},
+        bundle,
         p,
     )
 
@@ -116,18 +126,43 @@ def build_training_arrays(
     return np.vstack(X_list), np.array(y_list, dtype=int), hashes
 
 
+def class_counts_from_labels(y: np.ndarray) -> dict[int, int]:
+    """Count labels in the actual feature-bearing training set."""
+    return {int(label): int(np.sum(y == label)) for label in np.unique(y)}
+
+
+def training_targets_met(counts: dict[int, int]) -> bool:
+    return counts.get(1, 0) >= MIN_TRAIN_MALWARE and counts.get(0, 0) >= MIN_TRAIN_BENIGN
+
+
+def model_bundle_ready(bundle: dict[str, Any] | None) -> bool:
+    if bundle is None:
+        return False
+    raw_counts = bundle.get("training_counts")
+    if not isinstance(raw_counts, dict):
+        return False
+    counts = {int(label): int(count) for label, count in raw_counts.items()}
+    return training_targets_met(counts)
+
+
 def cold_start_train(tracker: db.MalwareTracker) -> dict[str, Any] | None:
     """Train initial LightGBM when enough labeled samples exist."""
     if allow_local_benign():
         ingest_benign_corpus(tracker)
-    counts = tracker.count_by_label()
+    X, y, _ = build_training_arrays(tracker)
+    counts = class_counts_from_labels(y)
     n_mal = counts.get(1, 0)
     n_ben = counts.get(0, 0)
-    if n_mal < MIN_TRAIN_MALWARE or n_ben < MIN_TRAIN_BENIGN:
-        logger.info("Cold-start skipped: malware=%d benign=%d", n_mal, n_ben)
+    if not training_targets_met(counts):
+        logger.info(
+            "Cold-start skipped: malware=%d/%d benign=%d/%d",
+            n_mal,
+            MIN_TRAIN_MALWARE,
+            n_ben,
+            MIN_TRAIN_BENIGN,
+        )
         return None
 
-    X, y, _ = build_training_arrays(tracker)
     n = len(y)
     train_end = int(n * 0.7)
     val_end = int(n * 0.85)
@@ -152,7 +187,7 @@ def cold_start_train(tracker: db.MalwareTracker) -> dict[str, Any] | None:
     model.fit(X_train, y_train)
     val_scores = predict_proba(model, X_val) if len(y_val) else np.array([0.5])
     threshold = fit_threshold(y_val, val_scores) if len(y_val) else 0.5
-    save_bundle(model, threshold)
+    save_bundle(model, threshold, training_counts=counts)
     logger.info("Cold-start model trained on %d samples", n)
     return load_bundle()
 
@@ -189,7 +224,7 @@ def retrain_model(
     val_scores = predict_proba(model, X_val) if len(y_val) else predict_proba(model, X_train)
     y_for_thr = y_val if len(y_val) else y_train
     threshold = fit_threshold(y_for_thr, val_scores[: len(y_for_thr)])
-    save_bundle(model, threshold)
+    save_bundle(model, threshold, training_counts=class_counts_from_labels(y))
     return load_bundle()
 
 

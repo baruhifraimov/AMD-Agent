@@ -14,7 +14,7 @@ from langgraph.graph import END, START, StateGraph
 
 import src.db.tracker as db
 from src.config import MIN_TRAIN_BENIGN, MIN_TRAIN_MALWARE, ensure_dirs
-from src.ml.classifier import load_bundle
+from src.ml.classifier import load_bundle, model_bundle_ready, training_targets_met
 from src.nodes import (
     active_learning_explain,
     binary_fetch,
@@ -63,7 +63,7 @@ def route_after_threat_queue(state: AgentState) -> Literal["binary_fetch", "sour
 
 DEFAULT_THREAD_ID = "amd-agent-default"
 _CHECKPOINTER = MemorySaver()
-DEFAULT_BOOTSTRAP_MAX_RUNS = 10
+DEFAULT_BOOTSTRAP_MAX_RUNS = 30
 DEFAULT_BOOTSTRAP_INTERVAL = 5
 
 
@@ -168,11 +168,11 @@ def run_bootstrap() -> AgentState | None:
     for run_idx in range(1, max_runs + 1):
         logger.info("Bootstrap pass %d/%d", run_idx, max_runs)
         final = run_pipeline()
-        if load_bundle() is not None:
+        counts = db.get_tracker().count_by_label()
+        if training_targets_met(counts) and model_bundle_ready(load_bundle()):
             logger.info("Bootstrap complete: model bundle is ready")
             return final
 
-        counts = db.get_tracker().count_by_label()
         n_mal = counts.get(1, 0)
         n_ben = counts.get(0, 0)
         logger.info(

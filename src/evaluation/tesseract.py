@@ -16,7 +16,7 @@ from sklearn.metrics import accuracy_score, precision_recall_fscore_support
 
 import src.config as cfg
 import src.db.tracker as db
-from src.ml.classifier import fit_threshold, load_bundle, predict_proba
+from src.ml.classifier import fit_threshold, load_bundle, model_bundle_ready, predict_proba
 from src.ml.features import features_to_vector
 
 logger = logging.getLogger(__name__)
@@ -62,7 +62,7 @@ def run_tesseract_eval(
     val_end = int(n * (train_ratio + val_ratio))
 
     bundle = load_bundle()
-    if bundle is None:
+    if not model_bundle_ready(bundle):
         return {}
 
     model = bundle["model"]

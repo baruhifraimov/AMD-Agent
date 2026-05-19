@@ -15,7 +15,10 @@ def _features(value: float) -> dict[str, float]:
 @patch("src.evaluation.tesseract.compute_aut", return_value=0.75)
 @patch("src.evaluation.tesseract.fit_threshold", return_value=0.5)
 @patch("src.evaluation.tesseract.predict_proba")
-@patch("src.evaluation.tesseract.load_bundle", return_value={"model": object()})
+@patch(
+    "src.evaluation.tesseract.load_bundle",
+    return_value={"model": object(), "training_counts": {"0": 100, "1": 100}},
+)
 def test_run_tesseract_eval_writes_aut_metric(
     mock_bundle,
     mock_predict,

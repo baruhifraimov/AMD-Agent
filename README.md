@@ -35,6 +35,10 @@ START
 - `ModelRetrain`: retrains with MADAR replay buffer. Single-class retrain batches are skipped safely.
 - `Evaluation`: runs TESSERACT-style chronological evaluation and computes AUT.
 
+The initial LightGBM model is not considered ready until SQLite contains at
+least 100 active malware samples and 100 active benign samples with extracted
+features. Pending hashes and corrupted rows do not count toward this threshold.
+
 ## Data Sources
 
 ### Malware
@@ -189,7 +193,8 @@ docker compose run --rm amd-agent python -m src.graph --once
 ```
 
 Run the default Docker bootstrap. This repeatedly collects samples until the
-initial model is trained or `AMD_BOOTSTRAP_MAX_RUNS` is reached:
+initial 100/100 malware/benign training target is met and the model is trained,
+or `AMD_BOOTSTRAP_MAX_RUNS` is reached:
 
 ```powershell
 docker compose up --force-recreate
