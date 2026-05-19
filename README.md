@@ -188,6 +188,13 @@ Run once:
 docker compose run --rm amd-agent python -m src.graph --once
 ```
 
+Run the default Docker bootstrap. This repeatedly collects samples until the
+initial model is trained or `AMD_BOOTSTRAP_MAX_RUNS` is reached:
+
+```powershell
+docker compose up --force-recreate
+```
+
 Run daemon:
 
 ```powershell

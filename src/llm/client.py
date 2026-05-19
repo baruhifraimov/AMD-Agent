@@ -11,7 +11,7 @@ import logging
 import os
 from typing import Any
 
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, Field
 
 from src.config import OLLAMA_BASE_URL, OLLAMA_MODEL, OLLAMA_TIMEOUT, REPORT_LANGUAGE
 
@@ -75,6 +75,7 @@ def _json_from_text(text: str) -> dict[str, Any] | list[Any] | None:
 def choose_sources_with_ollama(
     *,
     available_sources: list[str],
+    source_labels: dict[str, int],
     fallback_source: str,
     fallback_label: int,
     counts: dict[int, int],
@@ -92,25 +93,34 @@ def choose_sources_with_ollama(
     @tool
     def select_source_strategy(
         source_type: str,
-        selected_sources: list[str],
-        expected_label: int,
-        discovery_strategy: str,
-        cti_queries: list[str],
+        selected_sources: list[str] | None = None,
+        discovery_strategy: str = "",
+        cti_queries: list[str] | None = None,
     ) -> str:
-        """Choose the next source strategy for the malware detection pipeline."""
+        """Choose the next source strategy.
+
+        Args:
+            source_type: One source name from available_sources.
+            selected_sources: Optional source names with the same label.
+            discovery_strategy: Optional short reason for the choice.
+            cti_queries: Optional CTI search queries when source_type is dynamic_cti.
+        """
         return "accepted"
 
     system = (
         "You are controlling a malware detection ingestion graph. "
         "Call select_source_strategy exactly once. "
+        "The only required argument is source_type. "
         "Choose either malware-oriented sources or benign-oriented sources, not both. "
         "Use dynamic_cti only for malware hash discovery. "
         "If benign samples are underrepresented, prefer all benign providers. "
-        "If malware is needed, prefer malwarebazaar and optionally dynamic_cti."
+        "If malware is needed, prefer malwarebazaar and optionally dynamic_cti. "
+        "Do not provide expected_label; the program derives labels from the registry."
     )
     human = json.dumps(
         {
             "available_sources": available_sources,
+            "source_labels": source_labels,
             "fallback_source": fallback_source,
             "fallback_label": fallback_label,
             "sample_counts_by_label": counts,
@@ -132,18 +142,50 @@ def choose_sources_with_ollama(
     if not tool_calls:
         return None
     args = dict(tool_calls[0].get("args") or {})
-    try:
-        decision = SourceDecision.model_validate(args)
-    except ValidationError as exc:
-        logger.info("Invalid Ollama source decision; using fallback: %s", exc)
+    decision = _coerce_source_decision(args, available_sources, source_labels)
+    if decision is None:
+        logger.info("Invalid Ollama source decision; using fallback: %s", args)
+    return decision
+
+
+def _coerce_source_decision(
+    args: dict[str, Any],
+    available_sources: list[str],
+    source_labels: dict[str, int],
+) -> SourceDecision | None:
+    source_type = str(args.get("source_type") or "").strip()
+    if source_type not in available_sources:
         return None
-    if decision.expected_label not in (0, 1):
+
+    expected_label = source_labels.get(source_type)
+    if expected_label not in (0, 1):
         return None
-    selected = [s for s in decision.selected_sources if s in available_sources]
-    if not selected:
-        return None
-    source_type = decision.source_type if decision.source_type in selected else selected[0]
-    return decision.model_copy(update={"selected_sources": selected, "source_type": source_type})
+
+    raw_selected = args.get("selected_sources") or [source_type]
+    if isinstance(raw_selected, str):
+        raw_selected = [raw_selected]
+    if not isinstance(raw_selected, list):
+        raw_selected = [source_type]
+
+    selected: list[str] = []
+    for item in raw_selected:
+        name = str(item).strip()
+        if name in available_sources and source_labels.get(name) == expected_label:
+            selected.append(name)
+    if source_type not in selected:
+        selected.insert(0, source_type)
+
+    cti_queries = args.get("cti_queries") or []
+    if not isinstance(cti_queries, list):
+        cti_queries = []
+
+    return SourceDecision(
+        source_type=source_type,
+        selected_sources=selected,
+        expected_label=expected_label,
+        discovery_strategy=str(args.get("discovery_strategy") or "ollama"),
+        cti_queries=[str(query).strip() for query in cti_queries if str(query).strip()],
+    )
 
 
 def generate_cti_queries(default_queries: list[str], limit: int = 3) -> list[str]:

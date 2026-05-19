@@ -9,6 +9,7 @@ from src.nodes.active_learning_explain import active_learning_explain
 from src.nodes.binary_fetch import binary_fetch
 from src.nodes.source_selector import source_selector
 from src.nodes.source_discovery import source_discovery
+from src.llm.client import SourceDecision
 from src.sources.base import SampleCandidate
 from src.state import AgentState
 
@@ -154,7 +155,7 @@ def test_binary_fetch_uses_candidate_provider(mock_registry, tmp_paths):
 
 
 @patch("src.nodes.source_discovery.get_registry")
-def test_source_discovery_uses_selected_sources(mock_registry):
+def test_source_discovery_uses_selected_sources(mock_registry, tmp_paths):
     provider_a = MagicMock()
     provider_b = MagicMock()
     provider_a.name = "sysinternals"
@@ -176,6 +177,32 @@ def test_source_discovery_uses_selected_sources(mock_registry):
     assert [c["provider"] for c in out["sample_candidates"]] == ["sysinternals", "github"]
 
 
+@patch("src.nodes.binary_fetch.get_registry")
+def test_binary_fetch_skips_known_sha_before_download(mock_registry, tmp_paths, minimal_pe_path):
+    sha = minimal_pe_path.sha256
+    tmp_paths["tracker"].insert_sample(sha, str(minimal_pe_path.path), "2024-01-01", label=1)
+    provider = MagicMock()
+    registry = MagicMock()
+    registry.get.return_value = provider
+    mock_registry.return_value = registry
+
+    out = binary_fetch(
+        AgentState(
+            sample_candidates=[
+                SampleCandidate(
+                    sha,
+                    "malwarebazaar",
+                    1,
+                    {"sha256": sha},
+                ).to_dict()
+            ]
+        )
+    )
+
+    assert out["downloaded_paths"] == []
+    provider.download.assert_not_called()
+
+
 @patch("src.nodes.source_selector.choose_sources_with_ollama", return_value=None)
 @patch("src.nodes.source_selector.choose_provider")
 def test_source_selector_falls_back_when_ollama_unavailable(mock_choose, mock_ollama, tmp_paths):
@@ -188,6 +215,34 @@ def test_source_selector_falls_back_when_ollama_unavailable(mock_choose, mock_ol
 
     assert out["source_type"] == "malwarebazaar"
     assert out["selected_sources"] == ["malwarebazaar"]
+    assert out["discovery_strategy"] == "deterministic_fallback"
+
+
+@patch(
+    "src.nodes.source_selector.choose_sources_with_ollama",
+    return_value=SourceDecision(
+        source_type="malwarebazaar",
+        selected_sources=["malwarebazaar"],
+        expected_label=1,
+        discovery_strategy="ollama",
+    ),
+)
+@patch("src.nodes.source_selector.choose_provider")
+def test_source_selector_respects_required_label_over_ollama(
+    mock_choose,
+    mock_ollama,
+    tmp_paths,
+):
+    provider = MagicMock()
+    provider.name = "sysinternals"
+    provider.expected_label = 0
+    mock_choose.return_value = provider
+
+    out = source_selector(AgentState())
+
+    assert out["source_type"] == "sysinternals"
+    assert out["selected_sources"] == ["sysinternals"]
+    assert out["expected_label"] == 0
     assert out["discovery_strategy"] == "deterministic_fallback"
 
 

@@ -66,6 +66,11 @@ def test_get_recent_pe_mock(httpx_mock, tmp_paths):
         url="https://mb-api.abuse.ch/api/v1/",
         json=payload,
     )
+    httpx_mock.add_response(
+        method="POST",
+        url="https://mb-api.abuse.ch/api/v1/",
+        json={"query_status": "ok", "data": []},
+    )
     samples = get_recent_pe(limit=10)
     assert len(samples) == 1
 
@@ -78,4 +83,17 @@ def test_download_sample_zip_response(httpx_mock, infected_zip_bytes, tmp_paths)
         headers={"content-type": "application/zip"},
     )
     raw = download_sample("c" * 64)
+    assert raw[:2] == b"MZ"
+
+
+def test_download_sample_zip_response_with_misleading_json_content_type(
+    httpx_mock, infected_zip_bytes, tmp_paths
+):
+    httpx_mock.add_response(
+        method="POST",
+        url="https://mb-api.abuse.ch/api/v1/",
+        content=infected_zip_bytes,
+        headers={"content-type": "application/json"},
+    )
+    raw = download_sample("d" * 64)
     assert raw[:2] == b"MZ"

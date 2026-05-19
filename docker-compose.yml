@@ -1,6 +1,7 @@
 services:
   amd-agent:
     build: .
+    command: ["python", "-m", "src.graph", "--bootstrap"]
     env_file:
       - path: .env
         required: false
@@ -9,6 +10,7 @@ services:
       AMD_OLLAMA_BASE_URL: "${AMD_OLLAMA_BASE_URL:-http://ollama-host:11434}"
       AMD_CAPA_RULES_DIR: "/opt/capa-rules"
     volumes:
+      - ./src:/app/src:ro
       - ./data:/data
       - ./data/benign:/data/benign:ro
     cap_add:

@@ -29,6 +29,9 @@ def binary_fetch(state: AgentState) -> dict:
             if len(candidate_sha) == 64 and tracker.is_corrupted(candidate_sha):
                 logger.info("Skipping previously corrupted sample: %s", candidate_sha)
                 continue
+            if len(candidate_sha) == 64 and tracker.is_downloaded(candidate_sha):
+                logger.info("Already downloaded, skipping before fetch: %s", candidate_sha)
+                continue
             provider = registry.get(candidate.provider)
             content = provider.download(candidate)
             if len(content) < 2 or content[:2] != b"MZ":

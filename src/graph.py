@@ -4,13 +4,17 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 from pathlib import Path
+import time
 from typing import Literal
 
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, START, StateGraph
 
-from src.config import ensure_dirs
+import src.db.tracker as db
+from src.config import MIN_TRAIN_BENIGN, MIN_TRAIN_MALWARE, ensure_dirs
+from src.ml.classifier import load_bundle
 from src.nodes import (
     active_learning_explain,
     binary_fetch,
@@ -59,6 +63,8 @@ def route_after_threat_queue(state: AgentState) -> Literal["binary_fetch", "sour
 
 DEFAULT_THREAD_ID = "amd-agent-default"
 _CHECKPOINTER = MemorySaver()
+DEFAULT_BOOTSTRAP_MAX_RUNS = 10
+DEFAULT_BOOTSTRAP_INTERVAL = 5
 
 
 def build_graph():
@@ -146,11 +152,53 @@ def run_pipeline() -> AgentState:
     return final
 
 
+def run_bootstrap() -> AgentState | None:
+    """Run repeated graph passes until the initial model is ready or safety limit is hit."""
+    max_runs = _env_int("AMD_BOOTSTRAP_MAX_RUNS", DEFAULT_BOOTSTRAP_MAX_RUNS)
+    interval_seconds = _env_int("AMD_BOOTSTRAP_INTERVAL", DEFAULT_BOOTSTRAP_INTERVAL)
+    final: AgentState | None = None
+
+    logger.info(
+        "Bootstrap started max_runs=%d interval=%ds target_malware=%d target_benign=%d",
+        max_runs,
+        interval_seconds,
+        MIN_TRAIN_MALWARE,
+        MIN_TRAIN_BENIGN,
+    )
+    for run_idx in range(1, max_runs + 1):
+        logger.info("Bootstrap pass %d/%d", run_idx, max_runs)
+        final = run_pipeline()
+        if load_bundle() is not None:
+            logger.info("Bootstrap complete: model bundle is ready")
+            return final
+
+        counts = db.get_tracker().count_by_label()
+        n_mal = counts.get(1, 0)
+        n_ben = counts.get(0, 0)
+        logger.info(
+            "Bootstrap awaiting model: malware=%d/%d benign=%d/%d",
+            n_mal,
+            MIN_TRAIN_MALWARE,
+            n_ben,
+            MIN_TRAIN_BENIGN,
+        )
+        if run_idx < max_runs and interval_seconds > 0:
+            time.sleep(interval_seconds)
+
+    logger.warning("Bootstrap stopped before model was ready; increase AMD_BOOTSTRAP_MAX_RUNS")
+    return final
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="AMD-Agent malware detection pipeline")
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--once", action="store_true", help="Run pipeline once (default)")
     mode.add_argument("--daemon", action="store_true", help="Run pipeline on a schedule")
+    mode.add_argument(
+        "--bootstrap",
+        action="store_true",
+        help="Run repeated passes until the initial model is ready",
+    )
     parser.add_argument(
         "--config",
         type=Path,
@@ -163,8 +211,15 @@ def main() -> None:
         sched_cfg = load_scheduler_config(args.config)
         sched_cfg.enabled = True
         SchedulerLoop(sched_cfg).run(run_pipeline)
+    elif args.bootstrap:
+        run_bootstrap()
     else:
         run_pipeline()
+
+
+def _env_int(name: str, default: int) -> int:
+    raw = os.getenv(name, "").strip()
+    return int(raw) if raw else default
 
 
 if __name__ == "__main__":

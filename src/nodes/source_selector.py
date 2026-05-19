@@ -18,8 +18,11 @@ def source_selector(state: AgentState) -> dict:
     tracker = db.get_tracker()
     provider = choose_provider()
     counts = tracker.count_by_label()
+    available_sources = registry.list_names()
+    source_labels = {name: registry.get(name).expected_label for name in available_sources}
     decision = choose_sources_with_ollama(
-        available_sources=registry.list_names(),
+        available_sources=available_sources,
+        source_labels=source_labels,
         fallback_source=provider.name,
         fallback_label=provider.expected_label,
         counts=counts,
@@ -28,6 +31,14 @@ def source_selector(state: AgentState) -> dict:
         selected_labels = {registry.get(name).expected_label for name in decision.selected_sources}
         if len(selected_labels) != 1:
             logger.info("Ollama selected mixed-label sources; using deterministic fallback")
+            decision = None
+        elif decision.expected_label != provider.expected_label:
+            logger.info(
+                "Ollama selected label=%d while dataset balance requires label=%d; "
+                "using deterministic fallback",
+                decision.expected_label,
+                provider.expected_label,
+            )
             decision = None
 
     if decision is None:
