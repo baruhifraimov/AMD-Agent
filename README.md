@@ -137,17 +137,18 @@ AMD_OLLAMA_MODEL=gemma4:latest
 AMD_OLLAMA_TIMEOUT=8
 ```
 
-In Docker, compose uses a Docker-only override and defaults to:
+In Docker, compose also reads `AMD_OLLAMA_BASE_URL`. If the variable is not set,
+compose defaults it to:
 
 ```env
-AMD_DOCKER_OLLAMA_BASE_URL=http://ollama-host:11434
+AMD_OLLAMA_BASE_URL=http://ollama-host:11434
 ```
 
-If Docker runs inside a Windows VM and Ollama runs on the physical host, set
-`AMD_DOCKER_OLLAMA_BASE_URL` to an IP address that the VM can reach, for example:
+If Docker runs inside a Windows VM and Ollama runs on the physical host, set the
+same variable to an IP address that the VM can reach, for example:
 
 ```env
-AMD_DOCKER_OLLAMA_BASE_URL=http://192.168.56.1:11434
+AMD_OLLAMA_BASE_URL=http://192.168.56.1:11434
 ```
 
 If you want the README default model instead:
