@@ -79,6 +79,7 @@ def extract_pe_features_with_error(path: str | Path) -> tuple[dict[str, Any] | N
                             exec_api = 1.0
 
         optional = pe.OPTIONAL_HEADER
+        file_header = pe.FILE_HEADER
         features = {
             "dos_header_size": float(dos_header_size),
             "pe_header_offset": float(pe_header_offset),
@@ -94,7 +95,7 @@ def extract_pe_features_with_error(path: str | Path) -> tuple[dict[str, Any] | N
             "entry_point": float(optional.AddressOfEntryPoint),
             "subsystem": float(optional.Subsystem),
             "dll_characteristics": float(optional.DllCharacteristics),
-            "timestamp": float(optional.TimeDateStamp),
+            "timestamp": float(file_header.TimeDateStamp),
             "sha256": path.stem if len(path.stem) == 64 else "",
         }
         pe.close()

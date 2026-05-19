@@ -28,10 +28,11 @@ def test_extract_pe_features_mock(mock_pe_cls, minimal_pe_path):
     pe.OPTIONAL_HEADER.AddressOfEntryPoint = 0x1000
     pe.OPTIONAL_HEADER.Subsystem = 2
     pe.OPTIONAL_HEADER.DllCharacteristics = 0
-    pe.OPTIONAL_HEADER.TimeDateStamp = 12345
+    pe.FILE_HEADER.TimeDateStamp = 12345
     mock_pe_cls.return_value = pe
 
     feats = extract_pe_features(minimal_pe_path.path)
     assert feats is not None
     assert feats["num_sections"] == 1.0
+    assert feats["timestamp"] == 12345.0
     assert "avg_section_entropy" in feats
