@@ -63,7 +63,7 @@ Dynamic CTI uses a Hybrid Strict policy: CTI pages are used only as evidence for
 - Docker runs on isolated `malware_net`.
 - `docker/entrypoint.sh` blocks egress to private/local subnets with `iptables`.
 - `docker-compose.yml` grants `NET_ADMIN`, required for those `iptables` rules.
-- Docker allows `host.docker.internal:11434` for Ollama before private subnet blocking.
+- Docker allows the configured Ollama endpoint before private subnet blocking.
 - SQLite uses WAL mode to reduce lock errors with external ThreatIngestor writes.
 - LangGraph uses `MemorySaver` checkpointer with default thread id `amd-agent-default`.
 - Downloaded samples are stored under sandbox paths and are never executed.
@@ -137,10 +137,17 @@ AMD_OLLAMA_MODEL=gemma4:latest
 AMD_OLLAMA_TIMEOUT=8
 ```
 
-In Docker, compose overrides Ollama URL to:
+In Docker, compose uses a Docker-only override and defaults to:
 
 ```env
-AMD_OLLAMA_BASE_URL=http://host.docker.internal:11434
+AMD_DOCKER_OLLAMA_BASE_URL=http://ollama-host:11434
+```
+
+If Docker runs inside a Windows VM and Ollama runs on the physical host, set
+`AMD_DOCKER_OLLAMA_BASE_URL` to an IP address that the VM can reach, for example:
+
+```env
+AMD_DOCKER_OLLAMA_BASE_URL=http://192.168.56.1:11434
 ```
 
 If you want the README default model instead:

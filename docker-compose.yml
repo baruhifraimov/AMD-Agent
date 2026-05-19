@@ -6,7 +6,7 @@ services:
         required: false
     environment:
       AMD_AGENT_CONTAINER: "1"
-      AMD_OLLAMA_BASE_URL: "http://host.docker.internal:11434"
+      AMD_OLLAMA_BASE_URL: "${AMD_DOCKER_OLLAMA_BASE_URL:-http://ollama-host:11434}"
       AMD_CAPA_RULES_DIR: "/opt/capa-rules"
     volumes:
       - ./data:/data
@@ -14,6 +14,7 @@ services:
     cap_add:
       - NET_ADMIN
     extra_hosts:
+      - "ollama-host:host-gateway"
       - "host.docker.internal:host-gateway"
     networks:
       - malware_net
