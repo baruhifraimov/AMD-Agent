@@ -1,24 +1,75 @@
-FROM python:3.12-slim
+# syntax=docker/dockerfile:1.7
 
-WORKDIR /app
+FROM python:3.12-slim AS wheels
 
-COPY requirements.txt .
-RUN apt-get update && apt-get install -y --no-install-recommends \
+WORKDIR /build
+
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
+    apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
+    python3-dev
+
+COPY requirements.base.txt .
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip wheel --wheel-dir /wheels -r requirements.base.txt
+
+FROM python:3.12-slim AS extra-wheels
+
+WORKDIR /build
+
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
+    apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    python3-dev
+
+COPY requirements.txt requirements.base.txt ./
+RUN --mount=type=cache,target=/root/.cache/pip \
+    mkdir -p /extra-wheels \
+    && awk 'NF && $1 !~ /^#/ && $1 != "-r" && $1 != "--requirement" {print}' requirements.txt > /tmp/requirements.extra.txt \
+    && if [ -s /tmp/requirements.extra.txt ]; then pip wheel --wheel-dir /extra-wheels -r /tmp/requirements.extra.txt; fi
+
+FROM python:3.12-slim AS capa-rules
+
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
+    apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
-    git \
-    iptables \
-    python3-dev \
-    && pip install --no-cache-dir -r requirements.txt \
-    && apt-get purge -y --auto-remove build-essential python3-dev \
-    && rm -rf /var/lib/apt/lists/*
+    git
 
 RUN git clone --depth 1 https://github.com/mandiant/capa-rules.git /opt/capa-rules \
     && rm -rf /opt/capa-rules/.git
 
+FROM python:3.12-slim
+
+WORKDIR /app
+
+COPY --from=wheels /wheels /wheels
+COPY requirements.base.txt .
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install --no-index --find-links=/wheels -r requirements.base.txt \
+    && rm -rf /wheels
+
+COPY --from=extra-wheels /extra-wheels /extra-wheels
+COPY requirements.txt .
+RUN --mount=type=cache,target=/root/.cache/pip \
+    awk 'NF && $1 !~ /^#/ && $1 != "-r" && $1 != "--requirement" {print}' requirements.txt > /tmp/requirements.extra.txt \
+    && if [ -s /tmp/requirements.extra.txt ]; then pip install --no-index --find-links=/extra-wheels -r /tmp/requirements.extra.txt; fi \
+    && rm -rf /extra-wheels /tmp/requirements.extra.txt
+
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
+    apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    iptables \
+    libgomp1
+
+COPY --from=capa-rules /opt/capa-rules /opt/capa-rules
 COPY src/ ./src/
-COPY docker/entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh \
+COPY docker/entrypoint.sh ./docker/entrypoint.sh
+RUN sed -i 's/\r$//' /app/docker/entrypoint.sh \
+    && chmod +x /app/docker/entrypoint.sh \
     && mkdir -p /tmp/sandbox /data/models /data/benign \
     && chmod 700 /tmp/sandbox
 
@@ -27,5 +78,5 @@ ENV AMD_AGENT_CONTAINER=1
 ENV AMD_CAPA_RULES_DIR=/opt/capa-rules
 
 VOLUME ["/data"]
-ENTRYPOINT ["/entrypoint.sh"]
+ENTRYPOINT ["/app/docker/entrypoint.sh"]
 CMD ["python", "-m", "src.graph"]

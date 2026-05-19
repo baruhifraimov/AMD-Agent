@@ -97,7 +97,14 @@ ThreatQueue only consumes pending malware rows where `file_path=''` and `status`
   - Docker build clones official `capa-rules` into `/opt/capa-rules`.
   - Local runs need `AMD_CAPA_RULES_DIR` pointing to a valid rules directory.
 
-Python dependencies are listed in `requirements.txt`, including:
+Python dependencies are split for Docker cache stability:
+
+- `requirements.base.txt`: heavy/stable project dependencies.
+- `requirements.txt`: includes the base file for local installs and is the place to add new project dependencies.
+
+Docker installs `requirements.base.txt` in a stable cached layer first. New direct dependencies added to `requirements.txt` are installed in a later small layer, so the base dependency set is not reinstalled.
+
+Base dependencies include:
 
 - `langgraph`, `pydantic`
 - `langchain-ollama`, `langchain-core`
