@@ -63,16 +63,12 @@ def test_steady_pending_routes_to_intel(mock_reg):
 
 
 @patch("src.collection.strategies.steady.get_registry", side_effect=lambda: _registry())
-def test_steady_without_pending_uses_dynamic_cti(mock_reg):
-    from src.sources.dynamic_cti import DynamicCTIProvider
-
-    reg = _registry()
-    reg.register(DynamicCTIProvider())
-    with patch("src.collection.strategies.steady.get_registry", return_value=reg):
-        ctx = CollectionContext(benign_count=100, malware_count=100, model_ready=True, pending_depth=0)
-        result = SteadyStateSelectionStrategy().select(ctx)
-    assert result.source_type == "dynamic_cti"
-    assert result.route_hint == ""
+def test_steady_without_pending_routes_to_intel_poll(mock_reg):
+    ctx = CollectionContext(benign_count=100, malware_count=100, model_ready=True, pending_depth=0)
+    result = SteadyStateSelectionStrategy().select(ctx)
+    assert result.route_hint == "threat_intel_ingest"
+    assert result.discovery_strategy == "steady_intel_poll"
+    assert result.collection_phase == "steady"
 
 
 def test_factory_picks_bootstrap_when_counts_below_target():

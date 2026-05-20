@@ -20,21 +20,14 @@ class SteadyStateSelectionStrategy:
                 discovery_strategy="steady_benign_balance",
                 collection_phase="steady",
             )
-        if ctx.pending_depth > 0:
-            return SourceSelectionResult(
-                source_type="malwarebazaar",
-                selected_sources=["malwarebazaar"],
-                expected_label=1,
-                discovery_strategy="intel_pending_queue",
-                collection_phase="steady",
-                route_hint="threat_intel_ingest",
-            )
-        provider = registry.get("dynamic_cti")
+        discovery_strategy = (
+            "intel_pending_queue" if ctx.pending_depth > 0 else "steady_intel_poll"
+        )
         return SourceSelectionResult(
-            source_type=provider.name,
-            selected_sources=[provider.name],
+            source_type="malwarebazaar",
+            selected_sources=["malwarebazaar"],
             expected_label=1,
-            discovery_strategy="steady_explore",
+            discovery_strategy=discovery_strategy,
             collection_phase="steady",
-            cti_queries=[],
+            route_hint="threat_intel_ingest",
         )

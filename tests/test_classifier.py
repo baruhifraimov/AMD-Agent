@@ -1,11 +1,12 @@
 """Tests for classifier threshold and training."""
 
+import warnings
 from unittest.mock import patch
 
 import numpy as np
 
 from src.config import FEATURE_NAMES
-from src.ml.classifier import cold_start_train, fit_threshold, retrain_model
+from src.ml.classifier import cold_start_train, fit_threshold, predict_proba, retrain_model
 
 
 def test_fit_threshold_low_fpr():
@@ -43,3 +44,23 @@ def test_cold_start_skips_single_class_chronological_train(mock_lgb, tmp_paths):
 
     assert cold_start_train(tracker) is None
     mock_lgb.assert_not_called()
+
+
+def test_predict_proba_uses_named_features_without_sklearn_warning():
+    import lightgbm as lgb
+
+    n = 12
+    X = np.random.default_rng(42).random((n, len(FEATURE_NAMES)))
+    y = np.array([0] * 6 + [1] * 6, dtype=int)
+    model = lgb.LGBMClassifier(n_estimators=5, verbose=-1)
+    from src.ml.classifier import _feature_frame
+
+    model.fit(_feature_frame(X), y)
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "error",
+            message=".*does not have valid feature names.*",
+            category=UserWarning,
+        )
+        scores = predict_proba(model, X)
+    assert scores.shape == (n,)

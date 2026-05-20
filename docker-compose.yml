@@ -1,7 +1,7 @@
 services:
   amd-agent:
     build: .
-    command: ["python", "-m", "src.graph", "--bootstrap"]
+    command: ["/app/docker/amd-agent-run.sh"]
     env_file:
       - path: .env
         required: false

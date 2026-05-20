@@ -67,6 +67,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
 
 COPY --from=capa-rules /opt/capa-rules /opt/capa-rules
 COPY src/ ./src/
+COPY scripts/ ./scripts/
 COPY docker/ ./docker/
 COPY threatingestor_config.yml ./threatingestor_config.yml
 RUN sed -i 's/\r$//' /app/docker/*.sh \

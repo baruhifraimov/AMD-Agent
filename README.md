@@ -10,9 +10,9 @@ The project is designed for isolated execution in Docker or a malware-analysis V
 START
   -> SourceSelector (bootstrap vs steady strategies)
       -> benign or bootstrap malware: SourceDiscovery
-      -> steady malware with pending intel: ThreatIntelIngest
+      -> steady malware: ThreatIntelIngest (poll sidecar + feeds)
           -> queue has hashes: BinaryFetch
-          -> queue empty: SourceDiscovery (dynamic_cti)
+          -> queue empty: SourceDiscovery (dynamic_cti fallback)
   -> BinaryFetch
   -> DataValidation
   -> FeatureExtraction
@@ -185,6 +185,7 @@ Other useful variables:
 | `AMD_CTI_REQUEST_TIMEOUT` | CTI HTTP timeout |
 | `AMD_BOOTSTRAP_MAX_RUNS` | max bootstrap graph passes before giving up (default `60`) |
 | `AMD_BOOTSTRAP_INTERVAL` | seconds between bootstrap passes (default `10`) |
+| `AMD_ADWIN_DELTA` | River ADWIN confidence bound (default `0.002`; higher = less sensitive) |
 
 ## Docker Run
 
@@ -202,15 +203,36 @@ Run once:
 docker compose run --rm amd-agent python -m src.graph --once
 ```
 
-Run the default Docker bootstrap. This repeatedly collects samples until the
-initial 100/100 malware/benign training target is met and the model is trained,
-or `AMD_BOOTSTRAP_MAX_RUNS` is reached:
+Preflight diagnostics (local or before deploy):
+
+```powershell
+$env:PYTHONPATH="."
+python scripts/preflight_check.py
+```
+
+Production stack (`amd-agent` runs preflight, conditional bootstrap, then daemon):
 
 ```powershell
 docker compose up --force-recreate
 ```
 
-Run daemon:
+The default `amd-agent` command (`docker/amd-agent-run.sh`) skips bootstrap when
+trainable counts and `model.pkl` are already ready, then stays in `--daemon`
+(scheduler interval default 1800s; tune `AMD_SCHED_INTERVAL` in `.env`).
+
+One-off graph pass:
+
+```powershell
+docker compose run --rm amd-agent python -m src.graph --once
+```
+
+Manual bootstrap only (no daemon):
+
+```powershell
+docker compose run --rm amd-agent python -m src.graph --bootstrap
+```
+
+Manual daemon only:
 
 ```powershell
 docker compose run --rm amd-agent python -m src.graph --daemon
@@ -342,6 +364,16 @@ Docker config check:
 ```powershell
 docker compose config
 ```
+
+## Production verification (steady state)
+
+Before leaving the stack running continuously:
+
+1. `python scripts/preflight_check.py` — phase, per-class trainable counts, bundle ready, pending depth.
+2. `docker compose up` — logs show `bootstrap skipped` or bootstrap complete, then `Scheduler started`.
+3. Steady malware passes hit `ThreatIntelIngest` first; empty queue falls back to `SourceDiscovery`.
+4. `threatingestor` sidecar logs `AMD_COLLECTION_PHASE=steady` (not bootstrap skip loop).
+5. After new samples extract features, ADWIN updates use `AMD_ADWIN_DELTA` (tune if single-file retrains are too frequent).
 
 ## Known Runtime Checklist
 

@@ -9,6 +9,7 @@ from typing import Any
 import joblib
 import lightgbm as lgb
 import numpy as np
+import pandas as pd
 from sklearn.metrics import roc_curve
 
 from src.config import (
@@ -84,8 +85,26 @@ def fit_threshold(
     return float(thresholds[idx])
 
 
-def predict_proba(model: lgb.LGBMClassifier, X: np.ndarray) -> np.ndarray:
-    return model.predict_proba(X)[:, 1]
+def _feature_frame(X: np.ndarray, feature_names: list[str] | None = None) -> pd.DataFrame:
+    """Align inference/training matrices with LightGBM feature name expectations."""
+    columns = list(feature_names or FEATURE_NAMES)
+    if X.ndim == 1:
+        X = X.reshape(1, -1)
+    return pd.DataFrame(X, columns=columns)
+
+
+def predict_proba(
+    model: lgb.LGBMClassifier,
+    X: np.ndarray,
+    *,
+    feature_names: list[str] | None = None,
+) -> np.ndarray:
+    if X.size == 0:
+        return np.array([], dtype=np.float64)
+    return np.asarray(
+        model.predict_proba(_feature_frame(X, feature_names))[:, 1],
+        dtype=np.float64,
+    )
 
 
 def ingest_benign_corpus(tracker: db.MalwareTracker) -> int:
@@ -192,7 +211,7 @@ def cold_start_train(tracker: db.MalwareTracker) -> dict[str, Any] | None:
         random_state=42,
         verbose=-1,
     )
-    model.fit(X_train, y_train)
+    model.fit(_feature_frame(X_train), y_train)
     val_scores = predict_proba(model, X_val) if len(y_val) else np.array([0.5])
     threshold = fit_threshold(y_val, val_scores) if len(y_val) else 0.5
     save_bundle(model, threshold, training_counts=counts)
@@ -228,7 +247,7 @@ def retrain_model(
         random_state=42,
         verbose=-1,
     )
-    model.fit(X_train, y_train)
+    model.fit(_feature_frame(X_train), y_train)
     val_scores = predict_proba(model, X_val) if len(y_val) else predict_proba(model, X_train)
     y_for_thr = y_val if len(y_val) else y_train
     threshold = fit_threshold(y_for_thr, val_scores[: len(y_for_thr)])
@@ -246,5 +265,7 @@ def score_samples(
         return {}
     X = vectorize_batch(feature_dicts)
     model: lgb.LGBMClassifier = bundle["model"]
-    probs = predict_proba(model, X)
+    names = bundle.get("feature_names")
+    feature_names = list(names) if isinstance(names, list) else None
+    probs = predict_proba(model, X, feature_names=feature_names)
     return {h: float(p) for h, p in zip(hashes, probs)}
