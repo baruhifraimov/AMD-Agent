@@ -13,6 +13,7 @@ from src.ml.classifier import (
     score_samples,
 )
 from src.state import AgentState
+from src.tools.update import update_prediction
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +51,7 @@ def classifier_inference(state: AgentState) -> dict:
 
     for sha, prob in scores.items():
         predictions[sha] = prob
-        tracker.update_prediction(sha, prob)
+        update_prediction(tracker, sha, prob)
 
     metrics["decision_threshold"] = threshold
     metrics["mean_score"] = float(sum(scores.values()) / len(scores)) if scores else 0.0

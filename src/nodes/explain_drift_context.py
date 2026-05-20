@@ -1,4 +1,4 @@
-"""Active learning explain node using capa + best-effort Ollama reporting."""
+"""Explain drift context using capa + best-effort Ollama reporting."""
 
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ CAPA_TIMEOUT_SECONDS = 180
 CAPA_SAMPLE_LIMIT = 3
 
 
-def active_learning_explain(state: AgentState) -> dict:
+def explain_drift_context(state: AgentState) -> dict:
     capa_results: dict[str, dict] = dict(state.capa_results)
     for path in state.downloaded_paths[:CAPA_SAMPLE_LIMIT]:
         sha = Path(path).stem.lower()

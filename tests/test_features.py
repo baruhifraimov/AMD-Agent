@@ -4,8 +4,19 @@ from unittest.mock import MagicMock, patch
 
 import numpy as np
 
-from src.ml.features import extract_pe_features, features_to_vector
+from src.ml.features import extract_pe_features, extract_string_metrics, features_to_vector
 from src.config import FEATURE_NAMES
+
+
+def test_extract_string_metrics():
+    data = b"MZ\x00hello world\x00test1234"
+    count, avg_len = extract_string_metrics(data)
+    assert count >= 1
+    assert avg_len >= 4.0
+
+
+def test_feature_names_seventeen_dims():
+    assert len(FEATURE_NAMES) == 17
 
 
 def test_features_to_vector_shape():
@@ -36,3 +47,14 @@ def test_extract_pe_features_mock(mock_pe_cls, minimal_pe_path):
     assert feats["num_sections"] == 1.0
     assert feats["timestamp"] == 12345.0
     assert "avg_section_entropy" in feats
+    assert "string_count" in feats
+    assert "avg_string_length" in feats
+
+
+def test_extract_string_metrics():
+    from src.ml.features import extract_string_metrics
+
+    data = b"MZ\x00hello\x00world\x00" + b"AAAA" + b"BBBB"
+    count, avg_len = extract_string_metrics(data)
+    assert count >= 1
+    assert avg_len >= 4.0

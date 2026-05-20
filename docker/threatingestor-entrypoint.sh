@@ -1,17 +1,28 @@
 #!/bin/sh
 set -eu
 
-config_path="${THREATINGESTOR_CONFIG:-/app/threatingestor_config.yml}"
+template_config="${THREATINGESTOR_CONFIG:-/app/threatingestor_config.yml}"
+runtime_config="${THREATINGESTOR_RUNTIME_CONFIG:-/data/threatingestor_config.runtime.yml}"
 
-python -m src.threatingestor_bridge --daemon &
-bridge_pid="$!"
+while true; do
+  python -m src.intel.threatingestor_sleep \
+    --write-runtime-config \
+    --template "$template_config" \
+    --output "$runtime_config" >/dev/null
 
-threatingestor "$config_path" &
-ingestor_pid="$!"
+  AMD_COLLECTION_PHASE="$(python -c "from src.collection.context import current_collection_phase; print(current_collection_phase())")"
+  export AMD_COLLECTION_PHASE
 
-shutdown() {
-  kill "$bridge_pid" "$ingestor_pid" 2>/dev/null || true
-}
+  if [ "$AMD_COLLECTION_PHASE" = "bootstrap" ]; then
+    echo "ThreatIngestor skipped: AMD_COLLECTION_PHASE=bootstrap (awaiting 100/100 trainable samples)"
+    interval="$(python -m src.intel.threatingestor_sleep)"
+    sleep "$interval"
+    continue
+  fi
 
-trap shutdown INT TERM EXIT
-wait "$ingestor_pid"
+  threatingestor "$runtime_config" || true
+
+  interval="$(python -m src.intel.threatingestor_sleep)"
+  echo "ThreatIngestor sleeping ${interval}s before next pass (AMD_COLLECTION_PHASE=${AMD_COLLECTION_PHASE})"
+  sleep "$interval"
+done

@@ -3,10 +3,6 @@
 from __future__ import annotations
 
 from src.sources.base import PESourceProvider
-from src.sources.dynamic_cti import DynamicCTIProvider
-from src.sources.github_releases import GitHubReleasesProvider
-from src.sources.malwarebazaar import MalwareBazaarProvider
-from src.sources.sysinternals import SysinternalsProvider
 
 
 class SourceRegistry:
@@ -29,8 +25,18 @@ class SourceRegistry:
 
 
 def build_default_registry() -> SourceRegistry:
+    """Register providers lazily to avoid circular imports with src.intel.collector."""
+    from src.sources.dynamic_cti import DynamicCTIProvider
+    from src.sources.github_releases import GitHubReleasesProvider
+    from src.sources.malwarebazaar import MalwareBazaarProvider
+    from src.sources.sysinternals import SysinternalsProvider
+    from src.sources.threatfox import ThreatFoxProvider
+    from src.sources.twitter import TwitterProvider
+
     registry = SourceRegistry()
     registry.register(MalwareBazaarProvider())
+    registry.register(ThreatFoxProvider())
+    registry.register(TwitterProvider())
     registry.register(DynamicCTIProvider())
     registry.register(SysinternalsProvider())
     registry.register(GitHubReleasesProvider())

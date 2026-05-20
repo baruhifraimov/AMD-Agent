@@ -13,7 +13,13 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from src.config import OLLAMA_BASE_URL, OLLAMA_MODEL, OLLAMA_TIMEOUT, REPORT_LANGUAGE
+from src.config import (
+    OLLAMA_BASE_URL,
+    OLLAMA_MODEL,
+    OLLAMA_TIMEOUT,
+    REPORT_LANGUAGE,
+    ollama_source_selection_enabled,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -81,14 +87,19 @@ def choose_sources_with_ollama(
     counts: dict[int, int],
 ) -> SourceDecision | None:
     """Ask Ollama to choose a source strategy via tool binding."""
+    if not ollama_source_selection_enabled():
+        return None
     model = _chat_model()
     if model is None:
         return None
     try:
         from langchain_core.tools import tool
+        from src.tools.threat_intel_tools import build_intel_tools
     except Exception as exc:
         logger.info("Ollama source selection fallback: tool binding unavailable: %s", exc)
         return None
+
+    intel_tools = build_intel_tools()
 
     @tool
     def select_source_strategy(
@@ -112,11 +123,15 @@ def choose_sources_with_ollama(
         "Call select_source_strategy exactly once. "
         "The only required argument is source_type. "
         "Choose either malware-oriented sources or benign-oriented sources, not both. "
-        "Use dynamic_cti only for malware hash discovery. "
+        "Use dynamic_cti for broad web malware hash discovery. "
+        "When AMD_THREATINGESTOR_ENABLED, curated IOCs come from poll_threatingestor_artifacts. "
+        "When malware is needed and intel registry is empty, call discover_intel_sources. "
+        "When malware queue is shallow, call poll_intel_feeds then validate_and_queue_candidates. "
         "If benign samples are underrepresented, prefer all benign providers. "
-        "If malware is needed, prefer malwarebazaar and optionally dynamic_cti. "
+        "If malware is needed, prefer threat intel ingest path and malwarebazaar. "
         "Do not provide expected_label; the program derives labels from the registry."
     )
+    tools = [select_source_strategy, *intel_tools]
     human = json.dumps(
         {
             "available_sources": available_sources,
@@ -131,7 +146,7 @@ def choose_sources_with_ollama(
         }
     )
     try:
-        response = model.bind_tools([select_source_strategy]).invoke(
+        response = model.bind_tools(tools).invoke(
             [("system", system), ("human", human)]
         )
     except Exception as exc:
@@ -184,8 +199,25 @@ def _coerce_source_decision(
         selected_sources=selected,
         expected_label=expected_label,
         discovery_strategy=str(args.get("discovery_strategy") or "ollama"),
-        cti_queries=[str(query).strip() for query in cti_queries if str(query).strip()],
+        cti_queries=_normalize_cti_queries(cti_queries),
     )
+
+
+def _normalize_cti_queries(parsed: list[Any]) -> list[str]:
+    """Extract plain search strings from Ollama JSON (dict or str items)."""
+    cleaned: list[str] = []
+    for item in parsed:
+        if isinstance(item, dict):
+            val = item.get("query") or item.get("q")
+            if val is None and item:
+                val = next(iter(item.values()), None)
+            if isinstance(val, str) and val.strip():
+                cleaned.append(val.strip())
+        elif isinstance(item, str):
+            text = item.strip()
+            if text and "{" not in text and "'query':" not in text:
+                cleaned.append(text)
+    return cleaned
 
 
 def generate_cti_queries(default_queries: list[str], limit: int = 3) -> list[str]:
@@ -205,7 +237,7 @@ def generate_cti_queries(default_queries: list[str], limit: int = 3) -> list[str
         return default_queries[:limit]
     if not isinstance(parsed, list):
         return default_queries[:limit]
-    queries = [str(item).strip() for item in parsed if str(item).strip()]
+    queries = _normalize_cti_queries(parsed)
     return (queries or default_queries)[:limit]
 
 

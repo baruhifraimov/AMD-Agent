@@ -15,14 +15,31 @@ from src.config import CTI_PAGE_MAX_BYTES, CTI_REQUEST_TIMEOUT, CTI_SEARCH_LIMIT
 logger = logging.getLogger(__name__)
 
 SHA256_RE = re.compile(r"\b[a-fA-F0-9]{64}\b")
+PE_URL_RE = re.compile(
+    r"https?://[^\s\"'<>]+\.(?:exe|dll|sys|scr|zip)(?:\?[^\s\"'<>]*)?",
+    re.IGNORECASE,
+)
+
+
+def _ddgs_client():
+    try:
+        from ddgs import DDGS
+
+        return DDGS
+    except ImportError:
+        try:
+            from duckduckgo_search import DDGS
+
+            return DDGS
+        except Exception as exc:
+            logger.info("CTI search backend unavailable: %s", exc)
+            return None
 
 
 def web_search(query: str, limit: int = CTI_SEARCH_LIMIT) -> list[dict[str, str]]:
     """Search public web pages. Returns normalized title/url/snippet rows."""
-    try:
-        from duckduckgo_search import DDGS
-    except Exception as exc:
-        logger.info("duckduckgo_search unavailable: %s", exc)
+    DDGS = _ddgs_client()
+    if DDGS is None:
         return []
 
     rows: list[dict[str, str]] = []
@@ -67,6 +84,26 @@ def fetch_public_text(url: str) -> str:
     for tag in soup(["script", "style", "noscript"]):
         tag.decompose()
     return " ".join(soup.get_text(" ").split())
+
+
+def extract_pe_urls(text: str) -> list[str]:
+    """Extract direct PE/archive URLs from CTI text."""
+    from src.config import CTI_DOWNLOAD_ALLOWLIST
+
+    found: list[str] = []
+    seen: set[str] = set()
+    for match in PE_URL_RE.finditer(text):
+        url = match.group(0).rstrip(".,;)")
+        if url in seen or not is_public_url(url):
+            continue
+        host = (urlparse(url).hostname or "").lower()
+        if CTI_DOWNLOAD_ALLOWLIST and not any(
+            host == allowed or host.endswith(f".{allowed}") for allowed in CTI_DOWNLOAD_ALLOWLIST
+        ):
+            continue
+        seen.add(url)
+        found.append(url)
+    return found
 
 
 def extract_hash_contexts(text: str, *, url: str = "", window: int = 240) -> list[dict[str, str]]:

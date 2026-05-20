@@ -1,17 +1,31 @@
-# ThreatIngestor integration template for AMD-Agent.
-# Run locally with:
-#   threatingestor threatingestor_config.yml
+# ThreatIngestor template for AMD-Agent Plan B integration.
+# https://github.com/InQuest/ThreatIngestor
 #
-# ThreatIngestor's built-in SQLite operator writes extracted artifacts to its
-# own artifact database. AMD-Agent's bridge then imports SHA256 hashes from
-# that database into /data/malware_tracker.db as pending malware queue rows.
+# Run sidecar: docker compose up threatingestor
+# Or locally: threatingestor threatingestor_config.yml
+#
+# AMD-Agent polls /data/threatingestor_artifacts.db in-process (no bridge daemon).
 
 general:
   daemon: true
   sleep: 900
   state_path: /data/threatingestor_state.db
+# Poll interval is set by docker/threatingestor-entrypoint.sh:
+#   AMD_THREATINGESTOR_SLEEP_BOOTSTRAP=60  (until 100 malware + 100 benign trainable)
+#   AMD_THREATINGESTOR_SLEEP_STEADY=900     (after initial collection complete)
 
 credentials: []
+# Twitter example (requires threatingestor[twitter] and developer credentials):
+# credentials:
+#   - module: twitter
+#     api_key: ...
+#     api_secret: ...
+#     access_token: ...
+#     access_token_secret: ...
+# sources:
+#   - name: twitter-ioc-feed
+#     module: twitter
+#     list_id: "..."  # e.g. InQuest IOC feed list
 
 sources:
   - name: rss-unit42
@@ -22,16 +36,6 @@ sources:
   - name: rss-securelist
     module: rss
     url: https://securelist.com/feed/
-    feed_type: messy
-
-  - name: rss-citizenlab
-    module: rss
-    url: https://citizenlab.ca/feed/
-    feed_type: messy
-
-  - name: rss-malwarebytes
-    module: rss
-    url: https://www.malwarebytes.com/blog/feed
     feed_type: messy
 
 operators:

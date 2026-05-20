@@ -18,6 +18,8 @@ class AgentState(BaseModel):
 
     source_type: str = ""
     selected_sources: List[str] = Field(default_factory=list)
+    collection_phase: str = ""
+    route_hint: str = ""
     discovery_strategy: str = ""
     cti_queries: List[str] = Field(default_factory=list)
     cti_evidence: Dict[str, Dict[str, Any]] = Field(default_factory=dict)
@@ -28,3 +30,5 @@ class AgentState(BaseModel):
 
     hash_metadata: Dict[str, Dict[str, Any]] = Field(default_factory=dict)
     section_entropies: List[float] = Field(default_factory=list)
+    intel_poll_stats: Dict[str, Any] = Field(default_factory=dict)
+    intel_sources_polled: List[str] = Field(default_factory=list)

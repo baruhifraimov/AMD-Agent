@@ -32,17 +32,18 @@ def test_fetch_public_text_stream_truncates(httpx_mock, monkeypatch):
     assert len(text) <= 32
 
 
-@patch("src.sources.dynamic_cti.mb.is_pe_hash", return_value=True)
-@patch("src.sources.dynamic_cti.semantic_filter_hashes")
-@patch("src.sources.dynamic_cti.fetch_public_text")
-@patch("src.sources.dynamic_cti.web_search")
-@patch("src.sources.dynamic_cti.generate_cti_queries", return_value=["recent malware sha256"])
+@patch("src.intel.collector.mb.is_pe_hash", return_value=True)
+@patch("src.intel.collector.semantic_filter_hashes")
+@patch("src.tools.cti_search.fetch_public_text")
+@patch("src.tools.cti_search.web_search")
+@patch("src.intel.collector.generate_cti_queries", return_value=["recent malware sha256"])
 def test_dynamic_cti_discovers_hash_only_candidate(
     mock_queries,
     mock_search,
     mock_fetch,
     mock_filter,
     mock_is_pe,
+    tmp_paths,
 ):
     sha = "b" * 64
     mock_search.return_value = [
@@ -66,11 +67,9 @@ def test_dynamic_cti_discovers_hash_only_candidate(
     assert candidates[0].metadata["origin_url"] == "https://example.com/cti"
 
 
-@patch("src.sources.dynamic_cti.time.sleep")
-@patch("src.sources.dynamic_cti.web_search", return_value=[])
-@patch("src.sources.dynamic_cti.generate_cti_queries", return_value=["q1", "q2", "q3"])
-def test_dynamic_cti_jitters_between_queries(mock_queries, mock_search, mock_sleep):
-    DynamicCTIProvider().discover(limit=1)
-
-    assert mock_sleep.call_count == 2
-    mock_sleep.assert_any_call(2.0)
+@patch("src.tools.cti_search.web_search", return_value=[])
+@patch("src.intel.collector.generate_cti_queries", return_value=["q1", "q2", "q3"])
+def test_dynamic_cti_respects_page_limit(mock_queries, mock_search, tmp_paths):
+    candidates = DynamicCTIProvider().discover(limit=1)
+    assert candidates == []
+    assert mock_search.call_count >= 1

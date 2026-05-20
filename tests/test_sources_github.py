@@ -16,6 +16,10 @@ def test_discover_from_release_assets(httpx_mock, monkeypatch):
                     "name": "tool.exe",
                     "browser_download_url": "https://example.com/tool.exe",
                 },
+                {
+                    "name": "bundle.zip",
+                    "browser_download_url": "https://example.com/bundle.zip",
+                },
                 {"name": "notes.md", "browser_download_url": "https://example.com/n.txt"},
             ]
         },

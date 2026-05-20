@@ -16,12 +16,12 @@ import src.db.tracker as db
 from src.config import MIN_TRAIN_BENIGN, MIN_TRAIN_MALWARE, ensure_dirs
 from src.ml.classifier import load_bundle, model_bundle_ready, training_targets_met
 from src.nodes import (
-    active_learning_explain,
     binary_fetch,
     classifier_inference,
-    consume_threatingestor_queue,
+    threat_intel_ingest,
     data_validation,
     drift_monitor,
+    explain_drift_context,
     feature_extraction,
     model_retrain,
     source_discovery,
@@ -49,13 +49,19 @@ def route_after_drift(state: AgentState) -> Literal["inference", "retrain"]:
     return "retrain" if state.drift_detected else "inference"
 
 
-def route_after_selector(state: AgentState) -> Literal["benign_discovery", "malware_queue"]:
+def route_after_selector(
+    state: AgentState,
+) -> Literal["source_discovery", "threat_intel_ingest"]:
     if state.expected_label == 0:
-        return "benign_discovery"
-    return "malware_queue"
+        return "source_discovery"
+    if state.collection_phase == "bootstrap":
+        return "source_discovery"
+    if state.route_hint == "threat_intel_ingest":
+        return "threat_intel_ingest"
+    return "source_discovery"
 
 
-def route_after_threat_queue(state: AgentState) -> Literal["binary_fetch", "source_discovery"]:
+def route_after_intel_ingest(state: AgentState) -> Literal["binary_fetch", "source_discovery"]:
     if state.sample_candidates:
         return "binary_fetch"
     return "source_discovery"
@@ -63,8 +69,8 @@ def route_after_threat_queue(state: AgentState) -> Literal["binary_fetch", "sour
 
 DEFAULT_THREAD_ID = "amd-agent-default"
 _CHECKPOINTER = MemorySaver()
-DEFAULT_BOOTSTRAP_MAX_RUNS = 30
-DEFAULT_BOOTSTRAP_INTERVAL = 5
+DEFAULT_BOOTSTRAP_MAX_RUNS = 60
+DEFAULT_BOOTSTRAP_INTERVAL = 10
 
 
 def build_graph():
@@ -72,14 +78,14 @@ def build_graph():
     graph = StateGraph(AgentState)
 
     graph.add_node("source_selector", _wrap(source_selector))
-    graph.add_node("threat_queue", _wrap(consume_threatingestor_queue))
+    graph.add_node("threat_intel_ingest", _wrap(threat_intel_ingest))
     graph.add_node("source_discovery", _wrap(source_discovery))
     graph.add_node("binary_fetch", _wrap(binary_fetch))
     graph.add_node("data_validation", _wrap(data_validation))
     graph.add_node("feature_extraction", _wrap(feature_extraction))
     graph.add_node("drift_monitor", _wrap(drift_monitor))
     graph.add_node("classifier_inference", _wrap(classifier_inference))
-    graph.add_node("active_learning_explain", _wrap(active_learning_explain))
+    graph.add_node("explain_drift_context", _wrap(explain_drift_context))
     graph.add_node("model_retrain", _wrap(model_retrain))
 
     graph.add_edge(START, "source_selector")
@@ -87,13 +93,13 @@ def build_graph():
         "source_selector",
         route_after_selector,
         {
-            "benign_discovery": "source_discovery",
-            "malware_queue": "threat_queue",
+            "source_discovery": "source_discovery",
+            "threat_intel_ingest": "threat_intel_ingest",
         },
     )
     graph.add_conditional_edges(
-        "threat_queue",
-        route_after_threat_queue,
+        "threat_intel_ingest",
+        route_after_intel_ingest,
         {
             "binary_fetch": "binary_fetch",
             "source_discovery": "source_discovery",
@@ -108,11 +114,11 @@ def build_graph():
         route_after_drift,
         {
             "inference": "classifier_inference",
-            "retrain": "active_learning_explain",
+            "retrain": "explain_drift_context",
         },
     )
     graph.add_edge("classifier_inference", END)
-    graph.add_edge("active_learning_explain", "model_retrain")
+    graph.add_edge("explain_drift_context", "model_retrain")
     graph.add_edge("model_retrain", END)
 
     return graph.compile(checkpointer=_CHECKPOINTER)

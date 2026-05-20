@@ -41,21 +41,49 @@ TARGET_MALWARE_BENIGN_RATIO = 1.0
 BENIGN_PROVIDER_NAMES = ("sysinternals", "github")
 ALLOW_LOCAL_BENIGN_ENV = "AMD_ALLOW_LOCAL_BENIGN"
 THREAT_QUEUE_ENABLED_ENV = "AMD_THREAT_QUEUE_ENABLED"
+INTEL_INGEST_ENABLED_ENV = "AMD_INTEL_INGEST_ENABLED"
+INTEL_MIN_POLL_INTERVAL_ENV = "AMD_INTEL_MIN_POLL_INTERVAL"
+INTEL_MAX_POLL_INTERVAL_ENV = "AMD_INTEL_MAX_POLL_INTERVAL"
+INTEL_PENDING_CAP_MULT_ENV = "AMD_INTEL_PENDING_CAP_MULT"
+CTI_DOWNLOAD_ALLOWLIST_ENV = "AMD_CTI_DOWNLOAD_ALLOWLIST"
+PE_DOWNLOAD_MAX_BYTES_ENV = "AMD_PE_DOWNLOAD_MAX_BYTES"
+OLLAMA_SOURCE_SELECTION_ENV = "AMD_OLLAMA_SOURCE_SELECTION"
 OLLAMA_BASE_URL_ENV = "AMD_OLLAMA_BASE_URL"
 OLLAMA_MODEL_ENV = "AMD_OLLAMA_MODEL"
 OLLAMA_TIMEOUT_ENV = "AMD_OLLAMA_TIMEOUT"
 CAPA_RULES_DIR_ENV = "AMD_CAPA_RULES_DIR"
 REPORT_LANGUAGE_ENV = "AMD_REPORT_LANGUAGE"
+THREATINGESTOR_ENABLED_ENV = "AMD_THREATINGESTOR_ENABLED"
+THREATINGESTOR_CONFIG_ENV = "AMD_THREATINGESTOR_CONFIG"
 THREATINGESTOR_ARTIFACT_DB_ENV = "AMD_THREATINGESTOR_ARTIFACT_DB"
 THREATINGESTOR_BRIDGE_INTERVAL_ENV = "AMD_THREATINGESTOR_BRIDGE_INTERVAL"
 THREATINGESTOR_BRIDGE_BATCH_ENV = "AMD_THREATINGESTOR_BRIDGE_BATCH"
+THREATINGESTOR_SLEEP_BOOTSTRAP_ENV = "AMD_THREATINGESTOR_SLEEP_BOOTSTRAP"
+THREATINGESTOR_SLEEP_STEADY_ENV = "AMD_THREATINGESTOR_SLEEP_STEADY"
 
 
 def threat_queue_enabled() -> bool:
     return os.getenv(THREAT_QUEUE_ENABLED_ENV, "1").strip() not in ("0", "false", "no")
 
 
+def intel_ingest_enabled() -> bool:
+    return os.getenv(INTEL_INGEST_ENABLED_ENV, "1").strip() not in ("0", "false", "no")
+
+
+def ollama_source_selection_enabled() -> bool:
+    return os.getenv(OLLAMA_SOURCE_SELECTION_ENV, "1").strip() not in ("0", "false", "no")
+
+
+def threatingestor_enabled() -> bool:
+    return os.getenv(THREATINGESTOR_ENABLED_ENV, "1").strip() not in ("0", "false", "no")
+
+
 THREAT_QUEUE_ENABLED = threat_queue_enabled()
+THREATINGESTOR_ENABLED = threatingestor_enabled()
+INTEL_INGEST_ENABLED = intel_ingest_enabled()
+INTEL_MIN_POLL_INTERVAL = int(os.getenv(INTEL_MIN_POLL_INTERVAL_ENV, "60"))
+INTEL_MAX_POLL_INTERVAL = int(os.getenv(INTEL_MAX_POLL_INTERVAL_ENV, "3600"))
+INTEL_PENDING_CAP_MULT = int(os.getenv(INTEL_PENDING_CAP_MULT_ENV, "3"))
 
 # Local LLM / explainability
 OLLAMA_BASE_URL = os.getenv(OLLAMA_BASE_URL_ENV, "http://localhost:11434").strip()
@@ -73,12 +101,29 @@ THREATINGESTOR_ARTIFACT_DB = Path(
 ).expanduser()
 THREATINGESTOR_BRIDGE_INTERVAL = int(os.getenv(THREATINGESTOR_BRIDGE_INTERVAL_ENV, "30"))
 THREATINGESTOR_BRIDGE_BATCH = int(os.getenv(THREATINGESTOR_BRIDGE_BATCH_ENV, "100"))
+_default_threatingestor_config = (
+    Path("/app/threatingestor_config.yml")
+    if _in_container
+    else PROJECT_ROOT / "threatingestor_config.yml"
+)
+THREATINGESTOR_CONFIG_PATH = Path(
+    os.getenv(THREATINGESTOR_CONFIG_ENV, str(_default_threatingestor_config))
+).expanduser()
+THREATINGESTOR_SLEEP_BOOTSTRAP = int(os.getenv(THREATINGESTOR_SLEEP_BOOTSTRAP_ENV, "60"))
+THREATINGESTOR_SLEEP_STEADY = int(os.getenv(THREATINGESTOR_SLEEP_STEADY_ENV, "900"))
 
 # Dynamic CTI discovery limits
 CTI_SEARCH_LIMIT = int(os.getenv("AMD_CTI_SEARCH_LIMIT", "5"))
 CTI_PAGE_LIMIT = int(os.getenv("AMD_CTI_PAGE_LIMIT", "5"))
 CTI_PAGE_MAX_BYTES = int(os.getenv("AMD_CTI_PAGE_MAX_BYTES", "250000"))
 CTI_REQUEST_TIMEOUT = float(os.getenv("AMD_CTI_REQUEST_TIMEOUT", "20"))
+PE_DOWNLOAD_MAX_BYTES = int(os.getenv(PE_DOWNLOAD_MAX_BYTES_ENV, os.getenv("AMD_CTI_PAGE_MAX_BYTES", "250000")))
+_default_allowlist = "github.com,raw.githubusercontent.com,objects.githubusercontent.com"
+CTI_DOWNLOAD_ALLOWLIST = tuple(
+    d.strip().lower()
+    for d in os.getenv(CTI_DOWNLOAD_ALLOWLIST_ENV, _default_allowlist).split(",")
+    if d.strip()
+)
 
 # Sysinternals benign source
 SYSINTERNALS_BASE_URLS = (
@@ -92,7 +137,6 @@ GITHUB_TOKEN_ENV = "GITHUB_TOKEN"
 GITHUB_BENIGN_REPOS: list[tuple[str, str]] = [
     ("microsoft", "Sysinternals"),
     ("NotepadPlusPlus", "notepad-plus-plus"),
-    ("git-for-windows", "git"),
 ]
 
 EXEC_API_NAMES = frozenset(
@@ -122,6 +166,8 @@ FEATURE_NAMES = [
     "subsystem",
     "dll_characteristics",
     "timestamp",
+    "string_count",
+    "avg_string_length",
 ]
 
 
