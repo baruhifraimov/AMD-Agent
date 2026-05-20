@@ -67,9 +67,10 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
 
 COPY --from=capa-rules /opt/capa-rules /opt/capa-rules
 COPY src/ ./src/
-COPY docker/entrypoint.sh ./docker/entrypoint.sh
-RUN sed -i 's/\r$//' /app/docker/entrypoint.sh \
-    && chmod +x /app/docker/entrypoint.sh \
+COPY docker/ ./docker/
+COPY threatingestor_config.yml ./threatingestor_config.yml
+RUN sed -i 's/\r$//' /app/docker/*.sh \
+    && chmod +x /app/docker/*.sh \
     && mkdir -p /tmp/sandbox /data/models /data/benign \
     && chmod 700 /tmp/sandbox
 

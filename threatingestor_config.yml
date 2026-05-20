@@ -1,11 +1,3 @@
-# ThreatIngestor integration template for AMD-Agent.
-# Run locally with:
-#   threatingestor threatingestor_config.yml
-#
-# ThreatIngestor's built-in SQLite operator writes extracted artifacts to its
-# own artifact database. AMD-Agent's bridge then imports SHA256 hashes from
-# that database into /data/malware_tracker.db as pending malware queue rows.
-
 general:
   daemon: true
   sleep: 900

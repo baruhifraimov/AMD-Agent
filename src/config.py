@@ -46,6 +46,9 @@ OLLAMA_MODEL_ENV = "AMD_OLLAMA_MODEL"
 OLLAMA_TIMEOUT_ENV = "AMD_OLLAMA_TIMEOUT"
 CAPA_RULES_DIR_ENV = "AMD_CAPA_RULES_DIR"
 REPORT_LANGUAGE_ENV = "AMD_REPORT_LANGUAGE"
+THREATINGESTOR_ARTIFACT_DB_ENV = "AMD_THREATINGESTOR_ARTIFACT_DB"
+THREATINGESTOR_BRIDGE_INTERVAL_ENV = "AMD_THREATINGESTOR_BRIDGE_INTERVAL"
+THREATINGESTOR_BRIDGE_BATCH_ENV = "AMD_THREATINGESTOR_BRIDGE_BATCH"
 
 
 def threat_queue_enabled() -> bool:
@@ -60,6 +63,16 @@ OLLAMA_MODEL = os.getenv(OLLAMA_MODEL_ENV, "llama3.1:8b").strip()
 OLLAMA_TIMEOUT = float(os.getenv(OLLAMA_TIMEOUT_ENV, "8"))
 CAPA_RULES_DIR = Path(os.getenv(CAPA_RULES_DIR_ENV, "/opt/capa-rules")).expanduser()
 REPORT_LANGUAGE = os.getenv(REPORT_LANGUAGE_ENV, "English").strip() or "English"
+_default_threatingestor_artifact_db = (
+    Path("/data/threatingestor_artifacts.db")
+    if _in_container
+    else PROJECT_ROOT / "data" / "threatingestor_artifacts.db"
+)
+THREATINGESTOR_ARTIFACT_DB = Path(
+    os.getenv(THREATINGESTOR_ARTIFACT_DB_ENV, str(_default_threatingestor_artifact_db))
+).expanduser()
+THREATINGESTOR_BRIDGE_INTERVAL = int(os.getenv(THREATINGESTOR_BRIDGE_INTERVAL_ENV, "30"))
+THREATINGESTOR_BRIDGE_BATCH = int(os.getenv(THREATINGESTOR_BRIDGE_BATCH_ENV, "100"))
 
 # Dynamic CTI discovery limits
 CTI_SEARCH_LIMIT = int(os.getenv("AMD_CTI_SEARCH_LIMIT", "5"))
@@ -120,6 +133,7 @@ def ensure_dirs() -> None:
         MODEL_PATH.parent,
         BENIGN_DIR,
         FIGURES_DIR,
+        THREATINGESTOR_ARTIFACT_DB.parent,
     ):
         path.mkdir(parents=True, exist_ok=True)
 

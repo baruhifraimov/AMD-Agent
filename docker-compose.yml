@@ -21,6 +21,30 @@ services:
     networks:
       - malware_net
 
+  threatingestor:
+    build: .
+    command: ["/app/docker/threatingestor-entrypoint.sh"]
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      AMD_AGENT_CONTAINER: "1"
+      AMD_THREATINGESTOR_ARTIFACT_DB: "/data/threatingestor_artifacts.db"
+      AMD_THREATINGESTOR_BRIDGE_INTERVAL: "${AMD_THREATINGESTOR_BRIDGE_INTERVAL:-30}"
+      AMD_CAPA_RULES_DIR: "/opt/capa-rules"
+      THREATINGESTOR_CONFIG: "/app/threatingestor_config.yml"
+    volumes:
+      - ./src:/app/src:ro
+      - ./threatingestor_config.yml:/app/threatingestor_config.yml:ro
+      - ./data:/data
+    cap_add:
+      - NET_ADMIN
+    extra_hosts:
+      - "ollama-host:host-gateway"
+      - "host.docker.internal:host-gateway"
+    networks:
+      - malware_net
+
 networks:
   malware_net:
     driver: bridge

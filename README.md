@@ -117,6 +117,7 @@ Base dependencies include:
 - `river`, `lightgbm`, `scikit-learn`
 - `numpy`, `pandas`, `joblib`, `matplotlib`
 - `pytest`, `pytest-httpx`
+- `threatingestor[rss]`, `regex`
 
 ## Configuration
 
@@ -169,6 +170,8 @@ Other useful variables:
 | `AMD_BENIGN_PROVIDER` | force benign provider: `sysinternals` or `github` |
 | `AMD_ALLOW_LOCAL_BENIGN` | ingest `data/benign/*` as label `0` |
 | `AMD_THREAT_QUEUE_ENABLED` | enable/disable ThreatIngestor queue consumption |
+| `AMD_THREATINGESTOR_BRIDGE_INTERVAL` | seconds between ThreatIngestor bridge imports |
+| `AMD_THREATINGESTOR_BRIDGE_BATCH` | max artifact rows imported per bridge pass |
 | `AMD_CAPA_RULES_DIR` | capa rules directory passed with `-r` |
 | `AMD_REPORT_LANGUAGE` | language for Ollama drift report |
 | `AMD_CTI_SEARCH_LIMIT` | max search results per CTI query |
@@ -243,13 +246,28 @@ $env:AMD_CAPA_RULES_DIR="C:\capa-rules"
 
 ## ThreatIngestor Integration
 
-ThreatIngestor may run as a separate process and write pending hashes into SQLite.
+ThreatIngestor runs as a separate producer service and watches public CTI feeds.
+It extracts IOC artifacts from RSS content and writes SHA256 hash artifacts to
+`/data/threatingestor_artifacts.db` using ThreatIngestor's built-in SQLite
+operator. AMD-Agent then runs `src.threatingestor_bridge`, which imports
+new SHA256 artifacts into `/data/malware_tracker.db` as pending malware rows.
 
-Template:
+Run with Docker Compose:
 
 ```powershell
-copy threatingestor_config.yml.example threatingestor_config.yml
-threatingestor -c threatingestor_config.yml
+docker compose up --no-build --force-recreate
+```
+
+Run only ThreatIngestor and the bridge:
+
+```powershell
+docker compose up threatingestor
+```
+
+Run one bridge pass manually:
+
+```powershell
+docker compose run --rm amd-agent python -m src.threatingestor_bridge
 ```
 
 Expected pending row contract:
@@ -261,6 +279,10 @@ Expected pending row contract:
 | `label` | `1` |
 | `status` | `pending` |
 | `acquired_at` | timestamp |
+
+ThreatIngestor does not download binaries in this project. It only discovers
+hashes from CTI text. AMD-Agent's `ThreatQueue` consumes the pending rows and
+downloads the corresponding binaries through the approved provider pipeline.
 
 ## Evaluation
 
