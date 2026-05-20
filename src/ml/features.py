@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import math
+import re
 from collections import Counter
 from pathlib import Path
 from typing import Any
@@ -15,6 +16,17 @@ from src.config import EXEC_API_NAMES, FEATURE_NAMES
 
 logger = logging.getLogger(__name__)
 
+_ASCII_STRING_RE = re.compile(rb"[\x20-\x7E]{4,}")
+
+
+def extract_string_metrics(file_bytes: bytes) -> tuple[int, float]:
+    """Count ASCII strings (len>=4) and average length on raw file bytes."""
+    matches = _ASCII_STRING_RE.findall(file_bytes)
+    if not matches:
+        return 0, 0.0
+    lengths = [len(m) for m in matches]
+    return len(matches), float(sum(lengths) / len(lengths))
+
 
 def _shannon_entropy(data: bytes) -> float:
     if not data:
@@ -25,7 +37,7 @@ def _shannon_entropy(data: bytes) -> float:
 
 
 def extract_pe_features(path: str | Path) -> dict[str, Any] | None:
-    """Extract 15 structural PE features. Returns None on parse failure."""
+    """Extract structural PE features. Returns None on parse failure."""
     features, _ = extract_pe_features_with_error(path)
     return features
 
@@ -34,7 +46,15 @@ def extract_pe_features_with_error(path: str | Path) -> tuple[dict[str, Any] | N
     """Extract PE features and preserve raw pefile/feature errors for agent triage."""
     path = Path(path)
     try:
-        pe = pefile.PE(str(path), fast_load=True)
+        file_bytes = path.read_bytes()
+    except OSError as exc:
+        logger.warning("failed to read %s: %s", path, exc)
+        return None, str(exc)
+
+    string_count, avg_string_length = extract_string_metrics(file_bytes)
+
+    try:
+        pe = pefile.PE(data=file_bytes, fast_load=True)
         pe.parse_data_directories(
             directories=[
                 pefile.DIRECTORY_ENTRY["IMAGE_DIRECTORY_ENTRY_IMPORT"],
@@ -96,6 +116,8 @@ def extract_pe_features_with_error(path: str | Path) -> tuple[dict[str, Any] | N
             "subsystem": float(optional.Subsystem),
             "dll_characteristics": float(optional.DllCharacteristics),
             "timestamp": float(file_header.TimeDateStamp),
+            "string_count": float(string_count),
+            "avg_string_length": float(avg_string_length),
             "sha256": path.stem if len(path.stem) == 64 else "",
         }
         pe.close()

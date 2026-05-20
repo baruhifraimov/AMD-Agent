@@ -7,6 +7,7 @@ from pathlib import Path
 
 import src.db.tracker as db
 from src.state import AgentState
+from src.tools.update import insert_sample, mark_corrupted, update_file_path
 from src.tools.validate import file_sha256, is_duplicate, is_pe_mz, is_pe_signature
 
 logger = logging.getLogger(__name__)
@@ -29,7 +30,8 @@ def data_validation(state: AgentState) -> dict:
         if not is_pe_mz(path):
             logger.warning("MZ check failed: %s", sha)
             meta = state.hash_metadata.get(sha, {})
-            tracker.mark_corrupted(
+            mark_corrupted(
+                tracker,
                 sha,
                 "MZ signature check failed",
                 file_path=path,
@@ -40,7 +42,8 @@ def data_validation(state: AgentState) -> dict:
         if not is_pe_signature(path):
             logger.warning("PE signature check failed: %s", sha)
             meta = state.hash_metadata.get(sha, {})
-            tracker.mark_corrupted(
+            mark_corrupted(
+                tracker,
                 sha,
                 "PE signature check failed",
                 file_path=path,
@@ -52,7 +55,8 @@ def data_validation(state: AgentState) -> dict:
         if actual_sha != sha:
             logger.warning("SHA256 filename mismatch: path=%s expected=%s actual=%s", path, sha, actual_sha)
             meta = state.hash_metadata.get(sha, {})
-            tracker.mark_corrupted(
+            mark_corrupted(
+                tracker,
                 sha,
                 f"SHA256 filename mismatch: actual={actual_sha}",
                 file_path=path,
@@ -69,10 +73,10 @@ def data_validation(state: AgentState) -> dict:
         label = int(meta.get("expected_label", state.expected_label))
 
         if tracker.is_pending(sha):
-            tracker.update_file_path(sha, path)
+            update_file_path(tracker, sha, path)
             logger.info("Updated pending row with file_path: %s", sha)
         else:
-            tracker.insert_sample(sha, path, acquired, label=label)
+            insert_sample(tracker, sha, path, acquired, label=label)
 
         valid_paths.append(path)
         valid_hashes.append(sha)

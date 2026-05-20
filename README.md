@@ -8,30 +8,30 @@ The project is designed for isolated execution in Docker or a malware-analysis V
 
 ```text
 START
-  -> SourceSelector
-      -> benign path: SourceDiscovery
-      -> malware path: ThreatQueue
+  -> SourceSelector (bootstrap vs steady strategies)
+      -> benign or bootstrap malware: SourceDiscovery
+      -> steady malware with pending intel: ThreatIntelIngest
           -> queue has hashes: BinaryFetch
-          -> queue empty: SourceDiscovery
+          -> queue empty: SourceDiscovery (dynamic_cti)
   -> BinaryFetch
   -> DataValidation
   -> FeatureExtraction
   -> DriftMonitor
       -> no drift: ClassifierInference -> END
-      -> drift: ActiveLearningExplain -> ModelRetrain -> END
+      -> drift: ExplainDriftContext -> ModelRetrain -> END
 ```
 
 ### Main components
 
 - `SourceSelector`: asks Ollama to choose source strategy when available, with deterministic fallback based on malware/benign balance in SQLite.
-- `ThreatQueue`: consumes pending hashes inserted by ThreatIngestor. Corrupted hashes are skipped.
+- `ThreatIntelIngest`: discovers CTI sources at runtime, polls RSS/feeds, validates PE hashes upstream, and loads pending candidates into graph state.
 - `SourceDiscovery`: discovers samples from one or more registered providers.
 - `BinaryFetch`: downloads through each candidate's own provider, not a global provider.
 - `DataValidation`: checks MZ header, validates `PE\0\0` at `e_lfanew`, verifies filename SHA256, de-duplicates, skips known corrupted hashes, and syncs SQLite status.
-- `FeatureExtraction`: extracts 15 PE features using `pefile`; parse failures are triaged and marked `corrupted`.
+- `FeatureExtraction`: extracts 17 PE features (15 structural + string metrics) using `pefile`; parse failures are triaged and marked `corrupted`. Existing `model.pkl` with 15 features requires cold-start retrain.
 - `DriftMonitor`: uses River ADWIN over section entropy.
 - `ClassifierInference`: scores samples with LightGBM and FPR-aware thresholding.
-- `ActiveLearningExplain`: runs `capa -j -r <rules_dir>` and asks Ollama to produce a semantic drift report.
+- `ExplainDriftContext`: runs `capa -j -r <rules_dir>` and asks Ollama to produce a semantic drift report.
 - `ModelRetrain`: retrains with MADAR replay buffer. Single-class retrain batches are skipped safely.
 - `Evaluation`: runs TESSERACT-style chronological evaluation and computes AUT.
 
@@ -89,7 +89,7 @@ Dynamic CTI uses a Hybrid Strict policy: CTI pages are used only as evidence for
 | `reject_reason` | raw rejection/parse reason |
 | `rejected_at` | rejection timestamp |
 
-ThreatQueue only consumes pending malware rows where `file_path=''` and `status` is `pending` or `active`. Rows marked `corrupted` are not retried.
+ThreatIntelIngest discovers sources, validates hashes, and loads pending malware rows where `file_path=''` and `status` is `pending` or `active`. Rows marked `corrupted` are not retried.
 
 ## Requirements
 
@@ -112,12 +112,12 @@ Base dependencies include:
 
 - `langgraph`, `pydantic`
 - `langchain-ollama`, `langchain-core`
-- `httpx`, `beautifulsoup4`, `duckduckgo-search`
+- `httpx`, `beautifulsoup4`, `ddgs`
 - `pefile`, `pyzipper`, `flare-capa`
 - `river`, `lightgbm`, `scikit-learn`
 - `numpy`, `pandas`, `joblib`, `matplotlib`
 - `pytest`, `pytest-httpx`
-- `threatingestor[rss]`, `regex`
+- `feedparser`, `threatingestor[rss]`, `regex`
 
 ## Configuration
 
@@ -167,17 +167,24 @@ Other useful variables:
 | Variable | Purpose |
 |---|---|
 | `GITHUB_TOKEN` | optional GitHub token for release API rate limits |
+| `MALWAREBAZAAR_AUTH_KEY` | abuse.ch key for MalwareBazaar, ThreatFox, and Twitter/X CTI (social refs via ThreatFox API) |
 | `AMD_BENIGN_PROVIDER` | force benign provider: `sysinternals` or `github` |
 | `AMD_ALLOW_LOCAL_BENIGN` | ingest `data/benign/*` as label `0` |
-| `AMD_THREAT_QUEUE_ENABLED` | enable/disable ThreatIngestor queue consumption |
-| `AMD_THREATINGESTOR_BRIDGE_INTERVAL` | seconds between ThreatIngestor bridge imports |
-| `AMD_THREATINGESTOR_BRIDGE_BATCH` | max artifact rows imported per bridge pass |
+| `AMD_INTEL_INGEST_ENABLED` | enable/disable integrated threat intel ingest node |
+| `AMD_INTEL_MIN_POLL_INTERVAL` | minimum seconds between polls per high-yield source |
+| `AMD_INTEL_MAX_POLL_INTERVAL` | maximum seconds between polls per low-yield source |
+| `AMD_INTEL_PENDING_CAP_MULT` | skip polling when pending queue exceeds `PE_FETCH_LIMIT * mult` |
+| `AMD_OLLAMA_SOURCE_SELECTION` | bind intel `@tool`s for Ollama source selection |
+| `AMD_CTI_DOWNLOAD_ALLOWLIST` | comma-separated hosts allowed for direct PE URL fallback |
+| `AMD_PE_DOWNLOAD_MAX_BYTES` | max bytes for allowlisted direct downloads |
 | `AMD_CAPA_RULES_DIR` | capa rules directory passed with `-r` |
 | `AMD_REPORT_LANGUAGE` | language for Ollama drift report |
 | `AMD_CTI_SEARCH_LIMIT` | max search results per CTI query |
 | `AMD_CTI_PAGE_LIMIT` | max CTI pages per discovery run |
 | `AMD_CTI_PAGE_MAX_BYTES` | max bytes read from each CTI page |
 | `AMD_CTI_REQUEST_TIMEOUT` | CTI HTTP timeout |
+| `AMD_BOOTSTRAP_MAX_RUNS` | max bootstrap graph passes before giving up (default `60`) |
+| `AMD_BOOTSTRAP_INTERVAL` | seconds between bootstrap passes (default `10`) |
 
 ## Docker Run
 
@@ -244,45 +251,51 @@ git clone https://github.com/mandiant/capa-rules.git C:\capa-rules
 $env:AMD_CAPA_RULES_DIR="C:\capa-rules"
 ```
 
-## ThreatIngestor Integration
+## ThreatIntel + ThreatIngestor (Plan B)
 
-ThreatIngestor runs as a separate producer service and watches public CTI feeds.
-It extracts IOC artifacts from RSS content and writes SHA256 hash artifacts to
-`/data/threatingestor_artifacts.db` using ThreatIngestor's built-in SQLite
-operator. AMD-Agent then runs `src.threatingestor_bridge`, which imports
-new SHA256 artifacts into `/data/malware_tracker.db` as pending malware rows.
+Dual-path malware IOC collection:
 
-Run with Docker Compose:
+1. **[InQuest ThreatIngestor](https://github.com/InQuest/ThreatIngestor)** sidecar — curated RSS/plugin feeds → `/data/threatingestor_artifacts.db`
+2. **ThreatIntelCollector** (in-process) — polls TI artifacts, validates, queues; plus runtime feed discovery via `intel_sources`
+
+| Capability | Implementation |
+|---|---|
+| Curated CTI feeds | `threatingestor` Compose service + `threatingestor_config.yml` |
+| Artifact ingest | `src/intel/threatingestor_artifacts.py` polled by `threat_intel_ingest` |
+| Dynamic source discovery | Web search + LLM → `intel_sources` (native `feedparser` polls) |
+| Upstream validation | SHA256 + MalwareBazaar `is_pe_hash` before pending insert |
+| Multi-provider download | `src/tools/pe_download.py`: MB (retry) → allowlisted URL |
+| LangGraph tools | `poll_threatingestor_artifacts`, `discover_intel_sources`, `poll_intel_feeds`, `validate_and_queue_candidates` |
+
+Run both services:
 
 ```powershell
-docker compose up --no-build --force-recreate
+docker compose up --force-recreate
 ```
 
-Run only ThreatIngestor and the bridge:
+Run only the ThreatIngestor producer:
 
 ```powershell
 docker compose up threatingestor
 ```
 
-Run one bridge pass manually:
+| Env var | Purpose |
+|---|---|
+| `AMD_THREATINGESTOR_ENABLED` | Poll TI artifact DB from amd-agent (default `1`) |
+| `AMD_THREATINGESTOR_ARTIFACT_DB` | Path to TI SQLite operator DB |
+| `AMD_THREATINGESTOR_BRIDGE_BATCH` | Max artifact rows per graph ingest pass |
+| `AMD_THREATINGESTOR_SLEEP_BOOTSTRAP` | Seconds between TI passes until 100/100 trainable samples (default `60`) |
+| `AMD_THREATINGESTOR_SLEEP_STEADY` | Seconds between TI passes after initial collection (default `900`) |
+| `AMD_INTEL_INGEST_ENABLED` | Enable `threat_intel_ingest` node |
 
-```powershell
-docker compose run --rm amd-agent python -m src.threatingestor_bridge
-```
-
-Expected pending row contract:
+Pending row contract:
 
 | Column | Value |
 |---|---|
-| `sha256` | 64-char SHA256 |
-| `file_path` | empty string |
+| `sha256` | 64-char SHA256 or allowlisted URL key |
+| `file_path` | empty until fetched |
 | `label` | `1` |
 | `status` | `pending` |
-| `acquired_at` | timestamp |
-
-ThreatIngestor does not download binaries in this project. It only discovers
-hashes from CTI text. AMD-Agent's `ThreatQueue` consumes the pending rows and
-downloads the corresponding binaries through the approved provider pipeline.
 
 ## Evaluation
 

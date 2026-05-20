@@ -9,6 +9,7 @@ import src.db.tracker as db
 from src.llm import triage_pe_error
 from src.ml.features import extract_pe_features_with_error
 from src.state import AgentState
+from src.tools.update import mark_corrupted, update_features
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +32,8 @@ def feature_extraction(state: AgentState) -> dict:
             meta = state.hash_metadata.get(sha, {})
             decision = triage_pe_error(sha, path, message, meta)
             if decision == "reject":
-                tracker.mark_corrupted(
+                mark_corrupted(
+                    tracker,
                     sha,
                     message,
                     file_path=path,
@@ -50,7 +52,7 @@ def feature_extraction(state: AgentState) -> dict:
         feats["sha256"] = sha
         vectors.append(feats)
         entropies.append(float(feats.get("avg_section_entropy", 0.0)))
-        tracker.update_features(sha, feats)
+        update_features(tracker, sha, feats)
         valid_paths.append(path)
         valid_hashes.append(sha)
 

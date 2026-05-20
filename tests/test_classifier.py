@@ -18,7 +18,7 @@ def test_fit_threshold_low_fpr():
 @patch("src.ml.classifier.lgb.LGBMClassifier")
 @patch("src.ml.classifier.load_bundle", return_value={"model": "existing", "threshold": 0.7})
 def test_retrain_model_reuses_bundle_for_single_class(mock_load_bundle, mock_lgb):
-    X = np.ones((8, 15))
+    X = np.ones((8, len(FEATURE_NAMES)))
     y = np.ones(8, dtype=int)
 
     bundle = retrain_model(X, y)

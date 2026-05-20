@@ -1,4 +1,11 @@
+# ThreatIngestor sidecar config — https://github.com/InQuest/ThreatIngestor
+# Curated RSS feeds; artifacts land in /data/threatingestor_artifacts.db.
+# AMD-Agent polls and validates via ThreatIntelCollector (Plan B).
+
 general:
+  # daemon/sleep overridden by docker/threatingestor-entrypoint.sh:
+  # bootstrap: AMD_THREATINGESTOR_SLEEP_BOOTSTRAP (default 60s)
+  # steady (after 100/100 trainable samples): AMD_THREATINGESTOR_SLEEP_STEADY (default 900s)
   daemon: true
   sleep: 900
   state_path: /data/threatingestor_state.db

@@ -3,5 +3,6 @@
 # Add new project dependencies below this line.
 # Docker installs requirements.base.txt in a stable cached layer first, then
 # processes this file so new dependencies do not force reinstalling the base set.
+feedparser>=6.0.0
 threatingestor[rss]>=1.4.0
 regex>=2024.0.0

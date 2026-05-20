@@ -5,7 +5,7 @@ from unittest.mock import MagicMock, patch
 from src.nodes.data_validation import data_validation
 from src.nodes.drift_monitor import drift_monitor
 from src.nodes.feature_extraction import feature_extraction
-from src.nodes.active_learning_explain import active_learning_explain
+from src.nodes.explain_drift_context import explain_drift_context
 from src.nodes.binary_fetch import binary_fetch
 from src.nodes.source_selector import source_selector
 from src.nodes.source_discovery import source_discovery
@@ -104,21 +104,21 @@ def test_drift_monitor_no_drift(tmp_paths):
     assert out["drift_detected"] is False
 
 
-def test_active_learning_stub():
+def test_explain_drift_context_stub():
     state = AgentState(drift_detected=True, new_labeled_batch=[{"label": 1}])
-    out = active_learning_explain(state)
+    out = explain_drift_context(state)
     assert "Drift detected" in out["semantic_report"]
 
 
-@patch("src.nodes.active_learning_explain.subprocess.run")
-def test_active_learning_runs_capa_with_rules(mock_run, minimal_pe_path):
+@patch("src.nodes.explain_drift_context.subprocess.run")
+def test_explain_drift_context_runs_capa_with_rules(mock_run, minimal_pe_path):
     completed = MagicMock()
     completed.returncode = 0
     completed.stdout = '{"rules": {"create process": {}}, "meta": {}}'
     completed.stderr = ""
     mock_run.return_value = completed
 
-    out = active_learning_explain(
+    out = explain_drift_context(
         AgentState(
             drift_detected=True,
             downloaded_paths=[str(minimal_pe_path.path)],
@@ -133,15 +133,11 @@ def test_active_learning_runs_capa_with_rules(mock_run, minimal_pe_path):
     assert minimal_pe_path.sha256 in out["capa_results"]
 
 
-@patch("src.nodes.binary_fetch.get_registry")
-def test_binary_fetch_uses_candidate_provider(mock_registry, tmp_paths):
-    provider_a = MagicMock()
-    provider_b = MagicMock()
-    provider_a.download.return_value = b"MZprovider-a"
-    provider_b.download.return_value = b"MZprovider-b"
-    registry = MagicMock()
-    registry.get.side_effect = lambda name: {"sysinternals": provider_a, "github": provider_b}[name]
-    mock_registry.return_value = registry
+@patch("src.nodes.binary_fetch.ThreatIntelCollector")
+@patch("src.nodes.binary_fetch.download_pe_candidate")
+def test_binary_fetch_uses_candidate_provider(mock_download, mock_intel_cls, tmp_paths):
+    mock_download.side_effect = [b"MZ" + b"\x00" * 64, b"MZ" + b"\x01" * 64]
+    mock_intel_cls.return_value.record_download_outcome.return_value = None
 
     candidates = [
         SampleCandidate("a", "sysinternals", 0, {"url": "https://example.com/a.exe"}).to_dict(),
@@ -150,41 +146,26 @@ def test_binary_fetch_uses_candidate_provider(mock_registry, tmp_paths):
     out = binary_fetch(AgentState(sample_candidates=candidates, source_type="malwarebazaar"))
 
     assert len(out["downloaded_paths"]) == 2
-    provider_a.download.assert_called_once()
-    provider_b.download.assert_called_once()
+    assert mock_download.call_count == 2
 
 
-@patch("src.nodes.source_discovery.get_registry")
-def test_source_discovery_uses_selected_sources(mock_registry, tmp_paths):
-    provider_a = MagicMock()
-    provider_b = MagicMock()
-    provider_a.name = "sysinternals"
-    provider_b.name = "github"
-    provider_a.expected_label = 0
-    provider_b.expected_label = 0
-    provider_a.discover.return_value = [
-        SampleCandidate("a", "sysinternals", 0, {"url": "https://example.com/a.exe"})
+@patch("src.nodes.source_discovery.discover_with_fallback")
+def test_source_discovery_uses_selected_sources(mock_discover, tmp_paths):
+    mock_discover.return_value = [
+        SampleCandidate("a", "sysinternals", 0, {"url": "https://example.com/a.exe"}),
+        SampleCandidate("b", "github", 0, {"url": "https://example.com/b.exe"}),
     ]
-    provider_b.discover.return_value = [
-        SampleCandidate("b", "github", 0, {"url": "https://example.com/b.exe"})
-    ]
-    registry = MagicMock()
-    registry.get.side_effect = lambda name: {"sysinternals": provider_a, "github": provider_b}[name]
-    mock_registry.return_value = registry
 
     out = source_discovery(AgentState(selected_sources=["sysinternals", "github"], expected_label=0))
 
     assert [c["provider"] for c in out["sample_candidates"]] == ["sysinternals", "github"]
+    mock_discover.assert_called_once()
 
 
-@patch("src.nodes.binary_fetch.get_registry")
-def test_binary_fetch_skips_known_sha_before_download(mock_registry, tmp_paths, minimal_pe_path):
+@patch("src.nodes.binary_fetch.download_pe_candidate")
+def test_binary_fetch_skips_known_sha_before_download(mock_download, tmp_paths, minimal_pe_path):
     sha = minimal_pe_path.sha256
     tmp_paths["tracker"].insert_sample(sha, str(minimal_pe_path.path), "2024-01-01", label=1)
-    provider = MagicMock()
-    registry = MagicMock()
-    registry.get.return_value = provider
-    mock_registry.return_value = registry
 
     out = binary_fetch(
         AgentState(
@@ -200,22 +181,30 @@ def test_binary_fetch_skips_known_sha_before_download(mock_registry, tmp_paths, 
     )
 
     assert out["downloaded_paths"] == []
-    provider.download.assert_not_called()
+    mock_download.assert_not_called()
 
 
 @patch("src.nodes.source_selector.choose_sources_with_ollama", return_value=None)
-@patch("src.nodes.source_selector.choose_provider")
-def test_source_selector_falls_back_when_ollama_unavailable(mock_choose, mock_ollama, tmp_paths):
-    provider = MagicMock()
-    provider.name = "malwarebazaar"
-    provider.expected_label = 1
-    mock_choose.return_value = provider
+@patch("src.nodes.source_selector.CollectionStrategyFactory")
+def test_source_selector_falls_back_when_ollama_unavailable(mock_factory, mock_ollama, tmp_paths):
+    from src.collection.strategies.base import SourceSelectionResult
+
+    mock_selection = SourceSelectionResult(
+        source_type="malwarebazaar",
+        selected_sources=["malwarebazaar"],
+        expected_label=1,
+        discovery_strategy="bootstrap_fast_path",
+        collection_phase="bootstrap",
+    )
+    mock_strategy = MagicMock()
+    mock_strategy.select.return_value = mock_selection
+    mock_factory.create.return_value = mock_strategy
 
     out = source_selector(AgentState())
 
     assert out["source_type"] == "malwarebazaar"
     assert out["selected_sources"] == ["malwarebazaar"]
-    assert out["discovery_strategy"] == "deterministic_fallback"
+    assert out["collection_phase"] == "bootstrap"
 
 
 @patch(
@@ -227,23 +216,31 @@ def test_source_selector_falls_back_when_ollama_unavailable(mock_choose, mock_ol
         discovery_strategy="ollama",
     ),
 )
-@patch("src.nodes.source_selector.choose_provider")
+@patch("src.nodes.source_selector.CollectionStrategyFactory")
 def test_source_selector_respects_required_label_over_ollama(
-    mock_choose,
+    mock_factory,
     mock_ollama,
     tmp_paths,
 ):
-    provider = MagicMock()
-    provider.name = "sysinternals"
-    provider.expected_label = 0
-    mock_choose.return_value = provider
+    from src.collection.strategies.base import SourceSelectionResult
+
+    mock_selection = SourceSelectionResult(
+        source_type="sysinternals",
+        selected_sources=["sysinternals"],
+        expected_label=0,
+        discovery_strategy="bootstrap_fast_path",
+        collection_phase="bootstrap",
+    )
+    mock_strategy = MagicMock()
+    mock_strategy.select.return_value = mock_selection
+    mock_factory.create.return_value = mock_strategy
 
     out = source_selector(AgentState())
 
     assert out["source_type"] == "sysinternals"
     assert out["selected_sources"] == ["sysinternals"]
     assert out["expected_label"] == 0
-    assert out["discovery_strategy"] == "deterministic_fallback"
+    assert out["collection_phase"] == "bootstrap"
 
 
 @patch("src.nodes.feature_extraction.extract_pe_features_with_error")

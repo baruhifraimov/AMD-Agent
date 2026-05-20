@@ -8,6 +8,14 @@ from src.tools.malwarebazaar import (
     is_pe_hash,
     is_pe_sample,
 )
+from src.tools.update import (
+    insert_pending_hash,
+    insert_sample,
+    mark_corrupted,
+    update_features,
+    update_file_path,
+    update_prediction,
+)
 from src.tools.validate import file_sha256, is_duplicate, is_pe_mz, is_pe_signature
 
 __all__ = [
@@ -21,4 +29,10 @@ __all__ = [
     "is_pe_mz",
     "is_pe_signature",
     "is_duplicate",
+    "insert_sample",
+    "update_file_path",
+    "update_features",
+    "update_prediction",
+    "mark_corrupted",
+    "insert_pending_hash",
 ]

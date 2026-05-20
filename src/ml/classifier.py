@@ -32,7 +32,15 @@ def load_bundle(path: Path | None = None) -> dict[str, Any] | None:
     p = path or MODEL_PATH
     if not p.exists():
         return None
-    return joblib.load(p)
+    bundle = joblib.load(p)
+    names = bundle.get("feature_names")
+    if isinstance(names, list) and len(names) != len(FEATURE_NAMES):
+        logger.warning(
+            "Model feature_names length %d != config %d; cold-start retrain required",
+            len(names),
+            len(FEATURE_NAMES),
+        )
+    return bundle
 
 
 def save_bundle(

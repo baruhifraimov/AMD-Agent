@@ -270,6 +270,16 @@ class MalwareTracker:
                 (score, sha256.lower()),
             )
 
+    def get_sample(self, sha256: str) -> dict[str, Any] | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM samples WHERE sha256 = ?",
+                (sha256.lower(),),
+            ).fetchone()
+        if row is None:
+            return None
+        return self._row_to_dict(row)
+
     def fetch_chronological(self) -> list[dict[str, Any]]:
         with self._connect() as conn:
             rows = conn.execute(

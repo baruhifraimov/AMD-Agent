@@ -37,7 +37,8 @@ class GitHubReleasesProvider(PESourceProvider):
                 if not url:
                     continue
                 lower = name.lower()
-                if not (lower.endswith(".exe") or lower.endswith(".zip")):
+                if not lower.endswith(".exe"):
+                    logger.debug("Skipping non-executable asset: %s", name)
                     continue
                 candidates.append(
                     SampleCandidate(
