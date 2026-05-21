@@ -22,6 +22,39 @@ def _known_bad_or_downloaded(candidate: SampleCandidate, tracker: db.MalwareTrac
     )
 
 
+def _candidate_key(candidate: SampleCandidate) -> str:
+    ref = candidate.download_ref
+    for key in ("sha256", "fallback_url", "url"):
+        value = str(ref.get(key) or "").strip().lower()
+        if value:
+            return value
+    return str(candidate.external_id).strip().lower()
+
+
+def _append_fresh_candidates(
+    candidates: list[SampleCandidate],
+    discovered: list[SampleCandidate],
+    *,
+    tracker: db.MalwareTracker,
+    seen: set[str],
+    fetch_limit: int,
+) -> tuple[int, int]:
+    fresh = 0
+    returned = 0
+    for candidate in discovered:
+        key = _candidate_key(candidate)
+        if not key or key in seen:
+            continue
+        if _known_bad_or_downloaded(candidate, tracker):
+            continue
+        seen.add(key)
+        fresh += 1
+        if len(candidates) < fetch_limit:
+            candidates.append(candidate)
+            returned += 1
+    return fresh, returned
+
+
 def discover_with_fallback(
     source_names: list[str],
     *,
@@ -31,82 +64,85 @@ def discover_with_fallback(
     expected_label: int = 1,
     limit: int | None = None,
     cti_queries: list[str] | None = None,
+    stats: list[dict] | None = None,
 ) -> list[SampleCandidate]:
-    """Discover from primary providers; bootstrap malware may fall back to dynamic_cti."""
+    """Discover from providers and keep filling malware batches via fallbacks."""
     registry = registry or get_registry()
     tracker = tracker or db.get_tracker()
     if ctx is None:
         ctx = build_collection_context(tracker)
     fetch_limit = limit or PE_FETCH_LIMIT
     candidates: list[SampleCandidate] = []
+    seen: set[str] = set()
+    available = set(registry.list_names())
+    provider_chain = list(dict.fromkeys(source_names))
 
-    for source_name in source_names:
-        provider = registry.get(source_name)
-        try:
-            discovered = provider.discover(fetch_limit * 5)
-        except Exception as exc:
-            logger.warning("Discovery failed for provider=%s: %s", provider.name, exc)
-            continue
-        fresh = [c for c in discovered if not _known_bad_or_downloaded(c, tracker)]
-        candidates.extend(fresh)
-        logger.info(
-            "Discovered %d/%d fresh candidates from provider=%s label=%d",
-            len(fresh),
-            len(discovered),
-            provider.name,
-            provider.expected_label,
-        )
+    if expected_label == 1:
+        for fallback in ("threatfox", "twitter", "dynamic_cti"):
+            if fallback in available and fallback not in provider_chain:
+                provider_chain.append(fallback)
+
+    for source_name in provider_chain:
         if len(candidates) >= fetch_limit:
             break
-
-    if not candidates and expected_label == 1:
-        if "threatfox" in registry.list_names():
-            try:
-                tf_provider = registry.get("threatfox")
-                discovered = tf_provider.discover(fetch_limit * 5)
-            except Exception as exc:
-                logger.warning("ThreatFox fallback failed: %s", exc)
-                discovered = []
-            fresh = [c for c in discovered if not _known_bad_or_downloaded(c, tracker)]
-            candidates.extend(fresh)
-            logger.info(
-                "Primary dry (phase=%s); ThreatFox fallback yielded %d fresh",
-                ctx.phase,
-                len(fresh),
-            )
-
-    if not candidates and expected_label == 1 and "twitter" in registry.list_names():
+        request_limit = max((fetch_limit - len(candidates)) * 5, fetch_limit)
+        provider_name = source_name
         try:
-            tw_provider = registry.get("twitter")
-            discovered = tw_provider.discover(fetch_limit * 5)
+            if source_name == "dynamic_cti":
+                provider_name = "dynamic_cti"
+                from src.intel.collector import ThreatIntelCollector
+
+                discovered = ThreatIntelCollector(tracker=tracker).web_discover(
+                    request_limit,
+                    queries=cti_queries or None,
+                )
+            else:
+                provider = registry.get(source_name)
+                provider_name = provider.name
+                discovered = provider.discover(request_limit)
         except Exception as exc:
-            logger.warning("Twitter CTI fallback failed: %s", exc)
-            discovered = []
-        fresh = [c for c in discovered if not _known_bad_or_downloaded(c, tracker)]
-        candidates.extend(fresh)
-        logger.info(
-            "Twitter CTI fallback (phase=%s) yielded %d fresh candidates",
-            ctx.phase,
-            len(fresh),
+            logger.warning("Discovery failed for provider=%s: %s", provider_name, exc)
+            if stats is not None:
+                stats.append(
+                    {
+                        "stage": "discovery",
+                        "provider": provider_name,
+                        "discovered": 0,
+                        "fresh": 0,
+                        "returned": 0,
+                        "label": expected_label,
+                        "phase": ctx.phase,
+                        "error": str(exc),
+                    }
+                )
+            continue
+        fresh, returned = _append_fresh_candidates(
+            candidates,
+            discovered,
+            tracker=tracker,
+            seen=seen,
+            fetch_limit=fetch_limit,
         )
-
-    if not candidates and expected_label == 1:
-        logger.info(
-            "Primary discovery returned 0 fresh (phase=%s); falling back to dynamic_cti/DDG",
-            ctx.phase,
-        )
-        from src.intel.collector import ThreatIntelCollector
-
-        try:
-            discovered = ThreatIntelCollector(tracker=tracker).web_discover(
-                fetch_limit * 5,
-                queries=cti_queries or None,
+        if stats is not None:
+            stats.append(
+                {
+                    "stage": "discovery",
+                    "provider": provider_name,
+                    "discovered": len(discovered),
+                    "fresh": fresh,
+                    "returned": returned,
+                    "label": expected_label,
+                    "phase": ctx.phase,
+                }
             )
-        except Exception as exc:
-            logger.warning("dynamic_cti fallback failed: %s", exc)
-            discovered = []
-        fresh = [c for c in discovered if not _known_bad_or_downloaded(c, tracker)]
-        candidates.extend(fresh)
-        logger.info("dynamic_cti fallback yielded %d fresh candidates", len(fresh))
+        logger.info(
+            "Discovered %d/%d fresh candidates from provider=%s label=%d returned=%d/%d",
+            fresh,
+            len(discovered),
+            provider_name,
+            expected_label,
+            returned,
+            fetch_limit,
+        )
 
     return candidates[:fetch_limit]

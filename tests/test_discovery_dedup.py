@@ -41,3 +41,28 @@ def test_pending_hash_excluded_from_discovery():
         limit=5,
     )
     assert out == []
+
+
+def test_duplicate_hash_excluded_within_same_discovery_pass():
+    sha = "b" * 64
+    registry = _make_registry(
+        lambda _limit: [
+            SampleCandidate(sha, "malwarebazaar", 1, {"sha256": sha}),
+            SampleCandidate(sha, "malwarebazaar", 1, {"sha256": sha}),
+        ]
+    )
+    tracker = MagicMock()
+    tracker.is_downloaded.return_value = False
+    tracker.is_corrupted.return_value = False
+    tracker.is_pending.return_value = False
+
+    ctx = CollectionContext(benign_count=100, malware_count=100, model_ready=True, pending_depth=0)
+    out = discover_with_fallback(
+        ["malwarebazaar"],
+        registry=registry,
+        tracker=tracker,
+        ctx=ctx,
+        expected_label=1,
+        limit=5,
+    )
+    assert len(out) == 1

@@ -23,6 +23,10 @@ def binary_fetch(state: AgentState) -> dict:
     paths: list[str] = []
     hashes: list[str] = []
     metadata: dict = dict(state.hash_metadata)
+    failed = 0
+    non_pe = 0
+    skipped = 0
+    corrupted = 0
 
     for raw in state.sample_candidates:
         candidate = SampleCandidate.from_dict(raw)
@@ -30,14 +34,17 @@ def binary_fetch(state: AgentState) -> dict:
             candidate_sha = str(candidate.download_ref.get("sha256") or candidate.external_id).lower()
             if len(candidate_sha) == 64 and tracker.is_corrupted(candidate_sha):
                 logger.info("Skipping previously corrupted sample: %s", candidate_sha)
+                skipped += 1
                 continue
             if len(candidate_sha) == 64 and tracker.is_downloaded(candidate_sha):
                 logger.info("Already downloaded, skipping before fetch: %s", candidate_sha)
+                skipped += 1
                 continue
             content = download_pe_candidate(candidate)
             if len(content) < 2 or content[:2] != b"MZ":
                 logger.warning("Skipping non-PE download: %s", candidate.external_id)
                 intel.record_download_outcome(candidate.metadata, success=False)
+                non_pe += 1
                 ext = candidate.external_id
                 if len(ext) == 64:
                     mark_corrupted(
@@ -47,13 +54,16 @@ def binary_fetch(state: AgentState) -> dict:
                         acquired_at=candidate.metadata.get("first_seen"),
                         label=candidate.expected_label,
                     )
+                    corrupted += 1
                 continue
             sha = hashlib.sha256(content).hexdigest()
             if tracker.is_corrupted(sha):
                 logger.info("Skipping previously corrupted content hash: %s", sha)
+                skipped += 1
                 continue
             if tracker.is_downloaded(sha):
                 logger.info("Already downloaded, skipping: %s", sha)
+                skipped += 1
                 continue
             path = save_pe_to_sandbox(sha, content)
             paths.append(path)
@@ -68,10 +78,23 @@ def binary_fetch(state: AgentState) -> dict:
         except Exception as exc:
             logger.warning("Download failed for %s: %s", candidate.external_id, exc)
             intel.record_download_outcome(candidate.metadata, success=False)
+            failed += 1
 
     logger.info("Fetched %d/%d binaries", len(paths), len(state.sample_candidates))
+    metrics = dict(state.bootstrap_metrics)
+    metrics.update(
+        {
+            "download_attempted": len(state.sample_candidates),
+            "downloaded_count": len(paths),
+            "download_failed": failed,
+            "download_non_pe": non_pe,
+            "download_skipped": skipped,
+            "corrupted_count": int(metrics.get("corrupted_count", 0)) + corrupted,
+        }
+    )
     return {
         "downloaded_paths": paths,
         "discovered_hashes": hashes,
         "hash_metadata": metadata,
+        "bootstrap_metrics": metrics,
     }

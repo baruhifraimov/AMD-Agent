@@ -3,6 +3,7 @@
 from src.tools.fetch import save_pe_to_sandbox
 from src.tools.malwarebazaar import (
     download_sample,
+    get_file_type,
     get_file_info,
     get_recent_pe,
     is_pe_hash,
@@ -20,6 +21,7 @@ from src.tools.validate import file_sha256, is_duplicate, is_pe_mz, is_pe_signat
 
 __all__ = [
     "get_recent_pe",
+    "get_file_type",
     "download_sample",
     "get_file_info",
     "is_pe_hash",

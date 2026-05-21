@@ -44,12 +44,12 @@ features. Pending hashes and corrupted rows do not count toward this threshold.
 ### Malware
 
 - MalwareBazaar API:
-  - recent PE metadata discovery,
+  - PE file-type metadata discovery (`exe`, `dll`, `sys`, `scr`) with recent-sample fallback,
   - SHA256-based sample download,
   - password-protected ZIP extraction using password `infected`.
 
 - Dynamic CTI discovery:
-  - DuckDuckGo search,
+  - configurable `ddgs` backends and optional Brave Search API,
   - public CTI page fetching with strict byte truncation,
   - SHA256 extraction with surrounding evidence,
   - semantic hash filtering through Ollama when available.
@@ -59,7 +59,7 @@ Dynamic CTI uses a Hybrid Strict policy: CTI pages are used only as evidence for
 ### Benign
 
 - Sysinternals live directory.
-- GitHub release assets from curated benign repositories.
+- GitHub release `.exe` and `.zip` assets from curated benign repositories.
 - Optional local benign corpus under `data/benign`.
 
 ## Safety And Persistence
@@ -176,10 +176,13 @@ Other useful variables:
 | `AMD_INTEL_PENDING_CAP_MULT` | skip polling when pending queue exceeds `PE_FETCH_LIMIT * mult` |
 | `AMD_OLLAMA_SOURCE_SELECTION` | bind intel `@tool`s for Ollama source selection |
 | `AMD_CTI_DOWNLOAD_ALLOWLIST` | comma-separated hosts allowed for direct PE URL fallback |
+| `AMD_PE_FETCH_LIMIT` | max candidates returned per discovery pass (default `10`) |
 | `AMD_PE_DOWNLOAD_MAX_BYTES` | max bytes for allowlisted direct downloads |
 | `AMD_CAPA_RULES_DIR` | capa rules directory passed with `-r` |
 | `AMD_REPORT_LANGUAGE` | language for Ollama drift report |
 | `AMD_CTI_SEARCH_LIMIT` | max search results per CTI query |
+| `AMD_CTI_SEARCH_BACKENDS` | comma-separated `ddgs` text backends, for example `duckduckgo,brave` |
+| `AMD_BRAVE_SEARCH_API_KEY` | optional Brave Search API key for CTI page discovery |
 | `AMD_CTI_PAGE_LIMIT` | max CTI pages per discovery run |
 | `AMD_CTI_PAGE_MAX_BYTES` | max bytes read from each CTI page |
 | `AMD_CTI_REQUEST_TIMEOUT` | CTI HTTP timeout |

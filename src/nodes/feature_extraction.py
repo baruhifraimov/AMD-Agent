@@ -22,11 +22,14 @@ def feature_extraction(state: AgentState) -> dict:
     valid_hashes: list[str] = []
     feature_errors: dict[str, str] = dict(state.feature_errors)
     rejected = list(state.rejected_candidates)
+    rejected_before = len(rejected)
+    failed = 0
 
     for path in state.downloaded_paths:
         sha = Path(path).stem.lower()
         feats, error = extract_pe_features_with_error(path)
         if feats is None:
+            failed += 1
             message = error or "unknown pefile parse error"
             feature_errors[sha] = message
             meta = state.hash_metadata.get(sha, {})
@@ -57,6 +60,30 @@ def feature_extraction(state: AgentState) -> dict:
         valid_hashes.append(sha)
 
     logger.info("Extracted features for %d samples", len(vectors))
+    rejected_count = len(rejected) - rejected_before
+    metrics = dict(state.bootstrap_metrics)
+    metrics.update(
+        {
+            "feature_input": len(state.downloaded_paths),
+            "feature_extracted_count": len(vectors),
+            "feature_failed": failed,
+            "feature_corrupted_count": rejected_count,
+            "corrupted_count": int(metrics.get("corrupted_count", 0)) + rejected_count,
+        }
+    )
+    if state.collection_phase == "bootstrap":
+        discovery = metrics.get("discovery") or []
+        logger.info(
+            "Bootstrap pass summary: providers=%s discovered=%d fresh=%d downloaded=%d "
+            "pe_valid=%d feature_extracted=%d corrupted=%d",
+            ",".join(str(s.get("provider", "")) for s in discovery),
+            sum(int(s.get("discovered", 0)) for s in discovery),
+            sum(int(s.get("fresh", 0)) for s in discovery),
+            int(metrics.get("downloaded_count", 0)),
+            int(metrics.get("pe_valid_count", 0)),
+            len(vectors),
+            int(metrics.get("corrupted_count", 0)),
+        )
     return {
         "downloaded_paths": valid_paths,
         "discovered_hashes": valid_hashes,
@@ -64,4 +91,5 @@ def feature_extraction(state: AgentState) -> dict:
         "section_entropies": entropies,
         "feature_errors": feature_errors,
         "rejected_candidates": rejected,
+        "bootstrap_metrics": metrics,
     }

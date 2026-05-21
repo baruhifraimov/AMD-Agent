@@ -7,6 +7,11 @@ from src.collection.discovery_chain import discover_with_fallback
 from src.sources.base import SampleCandidate
 
 
+def _candidate(prefix: str, provider: str) -> SampleCandidate:
+    sha = prefix * 64
+    return SampleCandidate(sha, provider, 1, {"sha256": sha})
+
+
 def _make_registry(mb_discover, tf_discover=None, tw_discover=None):
     mb = MagicMock()
     mb.name = "malwarebazaar"
@@ -45,8 +50,9 @@ def _make_registry(mb_discover, tf_discover=None, tw_discover=None):
 
 
 @patch("src.intel.collector.ThreatIntelCollector")
-def test_malwarebazaar_empty_falls_back_to_threatfox_before_ddg(mock_coll_cls):
+def test_malwarebazaar_empty_continues_fallbacks_until_limit(mock_coll_cls):
     sha = "x" * 64
+    mock_coll_cls.return_value.web_discover.return_value = []
     registry, mb, tf, tw = _make_registry(
         mb_discover=lambda _limit: [],
         tf_discover=lambda _limit: [SampleCandidate(sha, "threatfox", 1, {"sha256": sha})],
@@ -68,13 +74,79 @@ def test_malwarebazaar_empty_falls_back_to_threatfox_before_ddg(mock_coll_cls):
     )
     assert len(out) == 1
     assert out[0].provider == "threatfox"
+    tw.discover.assert_called_once()
+    mock_coll_cls.return_value.web_discover.assert_called_once()
+
+
+@patch("src.intel.collector.ThreatIntelCollector")
+def test_malwarebazaar_full_batch_does_not_call_fallbacks(mock_coll_cls):
+    registry, _mb, tf, tw = _make_registry(
+        mb_discover=lambda _limit: [_candidate(str(i), "malwarebazaar") for i in range(5)],
+    )
+
+    tracker = MagicMock()
+    tracker.is_downloaded.return_value = False
+    tracker.is_corrupted.return_value = False
+    tracker.is_pending.return_value = False
+
+    ctx = CollectionContext(benign_count=0, malware_count=0, model_ready=False, pending_depth=0)
+    out = discover_with_fallback(
+        ["malwarebazaar"],
+        registry=registry,
+        tracker=tracker,
+        ctx=ctx,
+        expected_label=1,
+        limit=5,
+    )
+    assert len(out) == 5
+    tf.discover.assert_not_called()
     tw.discover.assert_not_called()
     mock_coll_cls.return_value.web_discover.assert_not_called()
 
 
 @patch("src.intel.collector.ThreatIntelCollector")
-def test_malwarebazaar_empty_falls_back_to_twitter_before_ddg(mock_coll_cls):
+def test_partial_batches_fill_from_fallbacks_before_dynamic_cti(mock_coll_cls):
+    registry, _mb, _tf, tw = _make_registry(
+        mb_discover=lambda _limit: [_candidate("a", "malwarebazaar")],
+        tf_discover=lambda _limit: [
+            _candidate("b", "threatfox"),
+            _candidate("c", "threatfox"),
+        ],
+        tw_discover=lambda _limit: [
+            _candidate("d", "twitter"),
+            _candidate("e", "twitter"),
+        ],
+    )
+
+    tracker = MagicMock()
+    tracker.is_downloaded.return_value = False
+    tracker.is_corrupted.return_value = False
+    tracker.is_pending.return_value = False
+
+    ctx = CollectionContext(benign_count=0, malware_count=0, model_ready=False, pending_depth=0)
+    out = discover_with_fallback(
+        ["malwarebazaar"],
+        registry=registry,
+        tracker=tracker,
+        ctx=ctx,
+        expected_label=1,
+        limit=5,
+    )
+    assert [c.provider for c in out] == [
+        "malwarebazaar",
+        "threatfox",
+        "threatfox",
+        "twitter",
+        "twitter",
+    ]
+    tw.discover.assert_called_once()
+    mock_coll_cls.return_value.web_discover.assert_not_called()
+
+
+@patch("src.intel.collector.ThreatIntelCollector")
+def test_malwarebazaar_empty_uses_twitter_before_dynamic_cti(mock_coll_cls):
     sha = "t" * 64
+    mock_coll_cls.return_value.web_discover.return_value = []
     registry, _mb, _tf, tw = _make_registry(
         mb_discover=lambda _limit: [],
         tf_discover=lambda _limit: [],
@@ -97,7 +169,7 @@ def test_malwarebazaar_empty_falls_back_to_twitter_before_ddg(mock_coll_cls):
     )
     assert len(out) == 1
     assert out[0].provider == "twitter"
-    mock_coll_cls.return_value.web_discover.assert_not_called()
+    mock_coll_cls.return_value.web_discover.assert_called_once()
 
 
 @patch("src.intel.collector.ThreatIntelCollector")

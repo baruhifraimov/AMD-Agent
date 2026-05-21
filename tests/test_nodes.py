@@ -24,6 +24,7 @@ def test_data_validation_filters_non_mz(tmp_paths, minimal_pe_path):
     )
     out = data_validation(state)
     assert len(out["downloaded_paths"]) == 1
+    assert out["bootstrap_metrics"]["pe_valid_count"] == 1
 
 
 def test_data_validation_malware_label(tmp_paths, minimal_pe_path):
@@ -146,19 +147,33 @@ def test_binary_fetch_uses_candidate_provider(mock_download, mock_intel_cls, tmp
     out = binary_fetch(AgentState(sample_candidates=candidates, source_type="malwarebazaar"))
 
     assert len(out["downloaded_paths"]) == 2
+    assert out["bootstrap_metrics"]["downloaded_count"] == 2
     assert mock_download.call_count == 2
 
 
 @patch("src.nodes.source_discovery.discover_with_fallback")
 def test_source_discovery_uses_selected_sources(mock_discover, tmp_paths):
-    mock_discover.return_value = [
-        SampleCandidate("a", "sysinternals", 0, {"url": "https://example.com/a.exe"}),
-        SampleCandidate("b", "github", 0, {"url": "https://example.com/b.exe"}),
-    ]
+    def discover_side_effect(*args, **kwargs):
+        kwargs["stats"].append(
+            {
+                "provider": "sysinternals",
+                "discovered": 2,
+                "fresh": 2,
+                "returned": 2,
+            }
+        )
+        return [
+            SampleCandidate("a", "sysinternals", 0, {"url": "https://example.com/a.exe"}),
+            SampleCandidate("b", "github", 0, {"url": "https://example.com/b.exe"}),
+        ]
+
+    mock_discover.side_effect = discover_side_effect
 
     out = source_discovery(AgentState(selected_sources=["sysinternals", "github"], expected_label=0))
 
     assert [c["provider"] for c in out["sample_candidates"]] == ["sysinternals", "github"]
+    assert out["bootstrap_metrics"]["discovered_count"] == 2
+    assert out["bootstrap_metrics"]["discovery"][0]["fresh"] == 2
     mock_discover.assert_called_once()
 
 
@@ -256,6 +271,7 @@ def test_feature_extraction(mock_extract, tmp_paths, minimal_pe_path):
     state = AgentState(downloaded_paths=[str(minimal_pe_path.path)])
     out = feature_extraction(state)
     assert len(out["feature_vectors"]) == 1
+    assert out["bootstrap_metrics"]["feature_extracted_count"] == 1
 
 
 @patch("src.nodes.feature_extraction.triage_pe_error", return_value="reject")

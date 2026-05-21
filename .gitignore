@@ -11,7 +11,6 @@ data/evaluation_log.jsonl
 .DS_Store
 ._*
 CLAUDE.md
-AGENTS.md
 graphify-out/
 .agent/
 .cursor/

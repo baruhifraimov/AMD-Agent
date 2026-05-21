@@ -32,3 +32,4 @@ class AgentState(BaseModel):
     section_entropies: List[float] = Field(default_factory=list)
     intel_poll_stats: Dict[str, Any] = Field(default_factory=dict)
     intel_sources_polled: List[str] = Field(default_factory=list)
+    bootstrap_metrics: Dict[str, Any] = Field(default_factory=dict)

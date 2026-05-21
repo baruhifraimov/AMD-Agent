@@ -15,14 +15,28 @@ def source_discovery(state: AgentState) -> dict:
     tracker = db.get_tracker()
     ctx = build_collection_context(tracker)
     source_names = state.selected_sources or ([state.source_type] if state.source_type else [])
+    discovery_stats: list[dict] = []
     candidates = discover_with_fallback(
         source_names,
         tracker=tracker,
         ctx=ctx,
         expected_label=state.expected_label,
         cti_queries=state.cti_queries or None,
+        stats=discovery_stats,
     )
+    metrics = dict(state.bootstrap_metrics)
+    metrics["discovery"] = discovery_stats
+    metrics["discovered_count"] = len(candidates)
+    if ctx.phase == "bootstrap":
+        logger.info(
+            "Bootstrap discovery summary: providers=%s discovered=%d fresh=%d returned=%d",
+            ",".join(str(s.get("provider", "")) for s in discovery_stats),
+            sum(int(s.get("discovered", 0)) for s in discovery_stats),
+            sum(int(s.get("fresh", 0)) for s in discovery_stats),
+            len(candidates),
+        )
     return {
         "sample_candidates": [c.to_dict() for c in candidates],
         "expected_label": state.expected_label,
+        "bootstrap_metrics": metrics,
     }

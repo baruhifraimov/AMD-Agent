@@ -17,15 +17,19 @@ def data_validation(state: AgentState) -> dict:
     tracker = db.get_tracker()
     valid_paths: list[str] = []
     valid_hashes: list[str] = []
+    corrupted = 0
+    skipped = 0
 
     for path in state.downloaded_paths:
         p = Path(path)
         sha = p.stem.lower()
         if len(sha) != 64:
             logger.warning("Skipping invalid path stem: %s", path)
+            skipped += 1
             continue
         if tracker.is_corrupted(sha):
             logger.info("Skipping previously corrupted hash: %s", sha)
+            skipped += 1
             continue
         if not is_pe_mz(path):
             logger.warning("MZ check failed: %s", sha)
@@ -38,6 +42,7 @@ def data_validation(state: AgentState) -> dict:
                 acquired_at=meta.get("first_seen"),
                 label=int(meta.get("expected_label", state.expected_label)),
             )
+            corrupted += 1
             continue
         if not is_pe_signature(path):
             logger.warning("PE signature check failed: %s", sha)
@@ -50,6 +55,7 @@ def data_validation(state: AgentState) -> dict:
                 acquired_at=meta.get("first_seen"),
                 label=int(meta.get("expected_label", state.expected_label)),
             )
+            corrupted += 1
             continue
         actual_sha = file_sha256(path)
         if actual_sha != sha:
@@ -63,9 +69,11 @@ def data_validation(state: AgentState) -> dict:
                 acquired_at=meta.get("first_seen"),
                 label=int(meta.get("expected_label", state.expected_label)),
             )
+            corrupted += 1
             continue
         if is_duplicate(sha, tracker):
             logger.info("Duplicate hash skipped: %s", sha)
+            skipped += 1
             continue
 
         meta = state.hash_metadata.get(sha, {})
@@ -81,7 +89,18 @@ def data_validation(state: AgentState) -> dict:
         valid_paths.append(path)
         valid_hashes.append(sha)
 
+    metrics = dict(state.bootstrap_metrics)
+    metrics.update(
+        {
+            "pe_validation_input": len(state.downloaded_paths),
+            "pe_valid_count": len(valid_paths),
+            "pe_corrupted_count": corrupted,
+            "pe_validation_skipped": skipped,
+            "corrupted_count": int(metrics.get("corrupted_count", 0)) + corrupted,
+        }
+    )
     return {
         "downloaded_paths": valid_paths,
         "discovered_hashes": valid_hashes,
+        "bootstrap_metrics": metrics,
     }

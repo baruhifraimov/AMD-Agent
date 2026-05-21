@@ -85,4 +85,5 @@ def source_selector(state: AgentState) -> dict:
         "cti_evidence": {},
         "intel_poll_stats": {},
         "intel_sources_polled": [],
+        "bootstrap_metrics": {},
     }

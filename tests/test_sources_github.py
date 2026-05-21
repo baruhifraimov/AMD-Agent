@@ -1,5 +1,8 @@
 """Tests for GitHub Releases provider."""
 
+import io
+import zipfile
+
 from src.sources.github_releases import GitHubReleasesProvider
 
 
@@ -26,5 +29,17 @@ def test_discover_from_release_assets(httpx_mock, monkeypatch):
     )
     provider = GitHubReleasesProvider()
     candidates = provider.discover(limit=5)
-    assert len(candidates) == 1
+    assert len(candidates) == 2
     assert candidates[0].metadata["file_name"] == "tool.exe"
+    assert candidates[1].metadata["file_name"] == "bundle.zip"
+
+
+def test_extract_first_pe_from_release_zip_allows_pe_extensions():
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr("readme.txt", b"not a pe")
+        zf.writestr("bin/tool.dll", b"MZdll")
+
+    raw = GitHubReleasesProvider._extract_first_pe_from_zip(buf.getvalue())
+
+    assert raw == b"MZdll"

@@ -14,6 +14,9 @@ from src.sources.base import PESourceProvider, SampleCandidate
 
 logger = logging.getLogger(__name__)
 
+DISCOVERABLE_ASSET_SUFFIXES = (".exe", ".zip")
+PE_ARCHIVE_SUFFIXES = (".exe", ".dll", ".sys", ".scr")
+
 
 class GitHubReleasesProvider(PESourceProvider):
     name = "github"
@@ -37,8 +40,8 @@ class GitHubReleasesProvider(PESourceProvider):
                 if not url:
                     continue
                 lower = name.lower()
-                if not lower.endswith(".exe"):
-                    logger.debug("Skipping non-executable asset: %s", name)
+                if not lower.endswith(DISCOVERABLE_ASSET_SUFFIXES):
+                    logger.debug("Skipping non-PE asset: %s", name)
                     continue
                 candidates.append(
                     SampleCandidate(
@@ -92,6 +95,6 @@ class GitHubReleasesProvider(PESourceProvider):
     def _extract_first_pe_from_zip(data: bytes) -> bytes:
         with zipfile.ZipFile(io.BytesIO(data)) as zf:
             for name in zf.namelist():
-                if name.lower().endswith(".exe"):
+                if name.lower().endswith(PE_ARCHIVE_SUFFIXES):
                     return zf.read(name)
-        raise RuntimeError("No .exe found inside GitHub release zip")
+        raise RuntimeError("No PE file found inside GitHub release zip")

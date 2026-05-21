@@ -6,7 +6,7 @@ import httpx
 import pytest
 
 from src.tools.fetch import save_pe_to_sandbox
-from src.tools.malwarebazaar import get_recent_pe, is_pe_sample, download_sample
+from src.tools.malwarebazaar import get_file_type, get_recent_pe, is_pe_sample, download_sample
 from src.tools.validate import file_sha256, is_duplicate, is_pe_mz, is_pe_signature
 from src.db.tracker import MalwareTracker
 
@@ -53,7 +53,48 @@ def test_save_pe_to_sandbox(tmp_paths):
     assert Path(path).read_bytes()[:2] == b"MZ"
 
 
-def test_get_recent_pe_mock(httpx_mock, tmp_paths):
+def test_get_file_type_mock(httpx_mock, tmp_paths):
+    payload = {
+        "query_status": "ok",
+        "data": [
+            {"sha256_hash": "a" * 64, "file_type": "exe"},
+        ],
+    }
+    httpx_mock.add_response(
+        method="POST",
+        url="https://mb-api.abuse.ch/api/v1/",
+        json=payload,
+    )
+    samples = get_file_type("exe", limit=10)
+    assert len(samples) == 1
+
+
+def test_get_recent_pe_queries_file_types_before_recent(httpx_mock, tmp_paths):
+    for prefix, file_type in zip("abcd", ("exe", "dll", "sys", "scr")):
+        httpx_mock.add_response(
+            method="POST",
+            url="https://mb-api.abuse.ch/api/v1/",
+            json={
+                "query_status": "ok",
+                "data": [
+                    {"sha256_hash": prefix * 64, "file_type": file_type},
+                ],
+            },
+        )
+    samples = get_recent_pe(limit=3)
+    assert len(samples) == 3
+    bodies = [request.content.decode() for request in httpx_mock.get_requests()]
+    assert all(f"file_type={file_type}" in "&".join(bodies) for file_type in ("exe", "dll", "sys", "scr"))
+    assert all("query=get_file_type" in body for body in bodies)
+
+
+def test_get_recent_pe_falls_back_to_recent_when_file_types_are_dry(httpx_mock, tmp_paths):
+    for _ in ("exe", "dll", "sys", "scr"):
+        httpx_mock.add_response(
+            method="POST",
+            url="https://mb-api.abuse.ch/api/v1/",
+            json={"query_status": "ok", "data": []},
+        )
     payload = {
         "query_status": "ok",
         "data": [
