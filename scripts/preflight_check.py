@@ -8,7 +8,7 @@ import logging
 import sys
 
 from src.collection.context import build_collection_context
-from src.config import MIN_TRAIN_BENIGN, MIN_TRAIN_MALWARE
+from src.config import BENIGN_DIR, MIN_TRAIN_BENIGN, MIN_TRAIN_MALWARE, allow_local_benign
 from src.db.tracker import get_tracker
 from src.ml.classifier import load_bundle, model_bundle_ready, training_targets_met
 
@@ -43,6 +43,19 @@ def main() -> int:
     logger.info("Pending Intelligence Depth -> Queue Count: %d", ctx.pending_depth)
     logger.info("Classifier Bundle Integrity -> Ready Status: [%s]", bundle_ok)
     logger.info("training_targets_met -> %s", training_targets_met(counts))
+
+    if allow_local_benign():
+        logger.warning(
+            "AMD_ALLOW_LOCAL_BENIGN is enabled; disable for submission experiments"
+        )
+    local_benign = [
+        p for p in BENIGN_DIR.glob("*") if p.is_file() and not p.name.startswith(".")
+    ]
+    if local_benign:
+        logger.warning(
+            "data/benign contains %d file(s); remove or disable local benign for submission",
+            len(local_benign),
+        )
 
     exit_code = 0
     if ctx.phase == "steady" and not bundle_ok:

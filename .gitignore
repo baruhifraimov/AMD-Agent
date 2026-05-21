@@ -8,9 +8,11 @@ data/malware_tracker.db
 data/models/*.pkl
 data/models/*.joblib
 data/evaluation_log.jsonl
+data/drift_log.jsonl
 .DS_Store
 ._*
 CLAUDE.md
 graphify-out/
 .agent/
 .cursor/
+AGENTS.md

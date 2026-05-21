@@ -18,19 +18,36 @@ def drift_monitor(state: AgentState) -> dict:
         return {
             "drift_detected": False,
             "new_labeled_batch": [],
+            "pending_drift_log": False,
+            "drift_stats": {},
+            "drift_pre_metrics": {},
         }
 
     service = DriftMonitorService()
-    drift_detected, labeled_batch = service.update_batch(
+    drift_detected, labeled_batch, drift_stats = service.update_batch(
         state.feature_vectors,
         state.section_entropies,
         hash_metadata=state.hash_metadata,
     )
 
-    if drift_detected:
-        logger.warning("Concept drift detected on %d verified sample(s)", len(labeled_batch))
-
-    return {
+    out: dict = {
         "drift_detected": drift_detected,
         "new_labeled_batch": labeled_batch,
+        "drift_stats": drift_stats,
+        "pending_drift_log": False,
+        "drift_pre_metrics": {},
     }
+
+    if drift_detected:
+        logger.warning(
+            "Concept drift detected: labeled_batch=%d stats=%s",
+            len(labeled_batch),
+            drift_stats,
+        )
+        from src.evaluation.tesseract import run_tesseract_eval
+
+        pre_metrics = run_tesseract_eval()
+        out["drift_pre_metrics"] = pre_metrics
+        out["pending_drift_log"] = True
+
+    return out

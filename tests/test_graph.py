@@ -59,6 +59,8 @@ def test_route_after_intel_ingest():
     assert route_after_intel_ingest(AgentState(sample_candidates=[{"x": 1}])) == "binary_fetch"
 
 
+@patch("src.evaluation.tesseract.run_tesseract_eval", return_value={})
+@patch("src.evaluation.tesseract.plot_performance_decay")
 @patch("src.nodes.threat_intel_ingest.build_collection_context")
 @patch("src.graph.build_collection_context")
 @patch("src.nodes.binary_fetch.download_pe_candidate")
@@ -74,6 +76,8 @@ def test_graph_malware_pending_queue_path(
     mock_download,
     mock_graph_ctx,
     mock_ti_ctx,
+    mock_plot,
+    mock_tesseract,
     tmp_paths,
     minimal_pe_path,
 ):
@@ -163,3 +167,10 @@ def test_graph_malware_pending_queue_path(
     assert final.source_type == "malwarebazaar"
     assert sha in final.discovered_hashes or len(final.feature_vectors) >= 0
     assert tracker.is_downloaded(sha)
+    mock_tesseract.assert_called_once()
+
+
+def test_build_graph_includes_evaluation_node():
+    graph = build_graph()
+    node_names = set(graph.get_graph().nodes.keys())
+    assert "evaluation" in node_names

@@ -7,12 +7,16 @@ import numpy as np
 
 from src.config import FEATURE_NAMES
 from src.ml.classifier import (
+    _adaptive_min_data_in_leaf,
+    _lgbm_default_params,
     cold_start_train,
+    fit_model_artifact,
     fit_threshold,
     model_bundle_ready,
     predict_proba,
     retrain_model,
 )
+from src.ml.splits import temporal_split
 
 
 def test_fit_threshold_low_fpr():
@@ -60,6 +64,47 @@ def test_cold_start_skips_single_class_chronological_train(mock_lgb, tmp_paths):
 
     assert cold_start_train(tracker) is None
     mock_lgb.assert_not_called()
+
+
+def test_temporal_split_preserves_order():
+    X = np.arange(20).reshape(20, 1).astype(float)
+    y = np.arange(20, dtype=int)
+    X_train, y_train, X_val, y_val, X_test, y_test = temporal_split(
+        X, y, train_ratio=0.7, val_ratio=0.15, test_ratio=0.15
+    )
+    assert len(y_train) == 14
+    assert len(y_val) == 3
+    assert len(y_test) == 3
+    assert y_train[-1] == 13
+    assert y_val[0] == 14
+    assert y_test[0] == 17
+
+
+def test_adaptive_min_data_in_leaf_scales_with_train_size():
+    assert _adaptive_min_data_in_leaf(40) == 5
+    assert _adaptive_min_data_in_leaf(200) == 10
+    params = _lgbm_default_params(200)
+    assert params["min_data_in_leaf"] == 10
+    assert params["class_weight"] == "balanced"
+
+
+def test_fit_model_artifact_records_temporal_split_metadata():
+    rng = np.random.default_rng(0)
+    n = 40
+    X = rng.random((n, len(FEATURE_NAMES)))
+    y = np.array([0] * 20 + [1] * 20, dtype=int)
+    X_train, y_train, X_val, y_val, _, _ = temporal_split(X, y, train_ratio=0.7, val_ratio=0.15)
+    bundle = fit_model_artifact(
+        X_train,
+        y_train,
+        X_val,
+        y_val,
+        optimize=False,
+        split_mode="temporal",
+    )
+    meta = bundle["split_metadata"]
+    assert meta["split_mode"] == "temporal"
+    assert meta["train_class_counts"][0] + meta["train_class_counts"][1] == len(y_train)
 
 
 def test_predict_proba_uses_named_features_without_sklearn_warning():

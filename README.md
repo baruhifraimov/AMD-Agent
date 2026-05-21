@@ -17,8 +17,8 @@ START
   -> DataValidation
   -> FeatureExtraction
   -> DriftMonitor
-      -> no drift: ClassifierInference -> END
-      -> drift: ExplainDriftContext -> ModelRetrain -> END
+      -> no drift: ClassifierInference -> Evaluation -> END
+      -> drift: ExplainDriftContext -> ModelRetrain -> Evaluation -> END
 ```
 
 ### Main components
@@ -33,7 +33,7 @@ START
 - `ClassifierInference`: scores samples with an XGBoost-ranked, Optuna-tuned LightGBM pipeline and FPR-aware thresholding.
 - `ExplainDriftContext`: runs `capa -j -r <rules_dir>` and asks Ollama to produce a semantic drift report.
 - `ModelRetrain`: retrains with MADAR replay buffer. Single-class retrain batches are skipped safely.
-- `Evaluation`: runs TESSERACT-style chronological evaluation and computes AUT.
+- `Evaluation` (LangGraph node): runs TESSERACT chronological eval every pass, appends `evaluation_log.jsonl`, plots decay; on drift cycles also writes `drift_log.jsonl` with pre/post metrics.
 
 The initial LightGBM model is not considered ready until SQLite contains at
 least 100 active malware samples and 100 active benign samples with extracted
@@ -344,7 +344,7 @@ Pending row contract:
 
 ## Evaluation
 
-TESSERACT-style evaluation is implemented in `src/evaluation/tesseract.py`.
+The `evaluation` LangGraph node (`src/nodes/evaluation_node.py`) runs at the end of every graph pass (inference and retrain branches). TESSERACT logic lives in `src/evaluation/tesseract.py`.
 
 It uses:
 
@@ -373,6 +373,23 @@ Docker figure path:
 ```
 
 The LaTeX report references `figures/performance_decay.png` and will not fail if the plot is not generated yet.
+
+Report artifacts (Docker paths; local dev uses `data/`):
+
+| File | Purpose |
+|------|---------|
+| `/data/evaluation_log.jsonl` | Per-run TESSERACT metrics (accuracy, FPR, AUT) |
+| `/data/drift_log.jsonl` | Concept drift events with pre/post metrics and capa excerpt |
+| `/data/figures/performance_decay.png` | Accuracy/FPR over evaluation runs |
+
+For LaTeX builds, copy or symlink the decay plot into `report/figures/performance_decay.png` after a long daemon session.
+
+### Submission checklist
+
+- Set `AMD_ALLOW_LOCAL_BENIGN=0` in `.env` (default in `.env.example`).
+- Keep `data/benign/` empty for experiments (no pre-seeded benign PEs).
+- Run `python scripts/preflight_check.py` and resolve warnings about local benign.
+- Generate report evidence: bootstrap if needed, then `--daemon` until `drift_log.jsonl` has several drift/retrain cycles.
 
 ## Tests
 

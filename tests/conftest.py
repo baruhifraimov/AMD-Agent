@@ -38,6 +38,7 @@ def tmp_paths(tmp_path, monkeypatch):
     monkeypatch.setattr("src.tools.fetch.SANDBOX_DIR", sandbox)
     monkeypatch.setattr("src.config.BENIGN_DIR", benign)
     monkeypatch.setattr("src.config.EVAL_LOG_PATH", tmp_path / "eval.jsonl")
+    monkeypatch.setattr("src.config.DRIFT_LOG_PATH", tmp_path / "drift.jsonl")
     monkeypatch.setattr("src.config.FIGURES_DIR", tmp_path / "figures")
     monkeypatch.setenv("MALWAREBAZAAR_AUTH_KEY", "test-key")
 

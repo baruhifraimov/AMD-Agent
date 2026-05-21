@@ -7,10 +7,6 @@ import logging
 from pathlib import Path
 from typing import Any
 
-import matplotlib
-
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
 import numpy as np
 from sklearn.metrics import accuracy_score, precision_recall_fscore_support
 
@@ -115,6 +111,11 @@ def append_eval_log(metrics: dict[str, float], path: Path | None = None) -> None
 
 def plot_performance_decay(log_path: Path | None = None, out_path: Path | None = None) -> Path:
     """Plot accuracy/FPR over evaluation runs."""
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
     cfg.ensure_dirs()
     log_path = log_path or cfg.EVAL_LOG_PATH
     out_path = out_path or cfg.FIGURES_DIR / "performance_decay.png"
