@@ -1,6 +1,6 @@
 """Tests for drift monitor verified per-sample labeling."""
 
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 from src.ml.services.drift_monitor import DriftMonitorService
 from src.nodes.drift_monitor import drift_monitor
@@ -39,3 +39,16 @@ def test_drift_node_delegates_to_service():
     out = drift_monitor(state)
     assert "drift_detected" in out
     assert "new_labeled_batch" in out
+
+
+@patch("src.nodes.drift_monitor.DriftMonitorService")
+def test_drift_node_skips_during_bootstrap(mock_service, tmp_paths):
+    state = AgentState(
+        collection_phase="bootstrap",
+        feature_vectors=[{"sha256": "e" * 64, "avg_section_entropy": 7.0}],
+        section_entropies=[7.0],
+        expected_label=0,
+    )
+    out = drift_monitor(state)
+    assert out == {"drift_detected": False, "new_labeled_batch": []}
+    mock_service.assert_not_called()
