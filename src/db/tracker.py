@@ -22,10 +22,13 @@ CREATE TABLE IF NOT EXISTS samples (
     anomaly_score REAL,
     status TEXT NOT NULL DEFAULT 'active',
     reject_reason TEXT,
-    rejected_at TEXT
+    rejected_at TEXT,
+    source_provider TEXT,
+    source_url TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_samples_acquired ON samples(acquired_at);
 CREATE INDEX IF NOT EXISTS idx_samples_status ON samples(status);
+CREATE INDEX IF NOT EXISTS idx_samples_source_url ON samples(source_url);
 """
 
 
@@ -67,6 +70,10 @@ class MalwareTracker:
             conn.execute("ALTER TABLE samples ADD COLUMN reject_reason TEXT")
         if "rejected_at" not in columns:
             conn.execute("ALTER TABLE samples ADD COLUMN rejected_at TEXT")
+        if "source_provider" not in columns:
+            conn.execute("ALTER TABLE samples ADD COLUMN source_provider TEXT")
+        if "source_url" not in columns:
+            conn.execute("ALTER TABLE samples ADD COLUMN source_url TEXT")
         conn.execute(
             """
             UPDATE samples
@@ -78,6 +85,7 @@ class MalwareTracker:
             """
         )
         conn.execute("CREATE INDEX IF NOT EXISTS idx_samples_status ON samples(status)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_samples_source_url ON samples(source_url)")
 
     def hash_exists(self, sha256: str) -> bool:
         with self._connect() as conn:
@@ -120,6 +128,21 @@ class MalwareTracker:
             row = conn.execute(
                 "SELECT 1 FROM samples WHERE sha256 = ? AND status = 'corrupted'",
                 (sha256.lower(),),
+            ).fetchone()
+        return row is not None
+
+    def is_source_url_seen(self, url: str) -> bool:
+        normalized = url.strip()
+        if not normalized:
+            return False
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT 1 FROM samples
+                WHERE source_url = ?
+                  AND COALESCE(status, 'active') != 'corrupted'
+                """,
+                (normalized,),
             ).fetchone()
         return row is not None
 
@@ -186,14 +209,16 @@ class MalwareTracker:
         status: str = "active",
         reject_reason: str | None = None,
         rejected_at: str | None = None,
+        source_provider: str | None = None,
+        source_url: str | None = None,
     ) -> None:
         features_json = json.dumps(features) if features is not None else None
         with self._connect() as conn:
             conn.execute(
                 """
                 INSERT OR REPLACE INTO samples
-                (sha256, file_path, acquired_at, features_json, label, prediction, anomaly_score, status, reject_reason, rejected_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                (sha256, file_path, acquired_at, features_json, label, prediction, anomaly_score, status, reject_reason, rejected_at, source_provider, source_url)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     sha256.lower(),
@@ -206,6 +231,8 @@ class MalwareTracker:
                     status,
                     reject_reason,
                     rejected_at,
+                    source_provider,
+                    source_url,
                 ),
             )
 

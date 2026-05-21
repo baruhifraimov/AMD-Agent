@@ -66,3 +66,26 @@ def test_duplicate_hash_excluded_within_same_discovery_pass():
         limit=5,
     )
     assert len(out) == 1
+
+
+def test_seen_source_url_excluded_from_discovery():
+    url = "https://example.com/tool.exe"
+    registry = _make_registry(
+        lambda _limit: [
+            SampleCandidate(url, "sysinternals", 0, {"url": url}),
+        ]
+    )
+    tracker = MagicMock()
+    tracker.is_source_url_seen.return_value = True
+
+    ctx = CollectionContext(benign_count=0, malware_count=100, model_ready=False, pending_depth=0)
+    out = discover_with_fallback(
+        ["sysinternals"],
+        registry=registry,
+        tracker=tracker,
+        ctx=ctx,
+        expected_label=0,
+        limit=5,
+    )
+    assert out == []
+    tracker.is_source_url_seen.assert_called_once_with(url)

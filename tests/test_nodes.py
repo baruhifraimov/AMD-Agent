@@ -41,6 +41,29 @@ def test_data_validation_malware_label(tmp_paths, minimal_pe_path):
     assert any(r["sha256"] == sha and r["label"] == 1 for r in rows)
 
 
+def test_data_validation_persists_source_url(tmp_paths, minimal_pe_path):
+    sha = minimal_pe_path.sha256
+    url = "https://example.com/tool.exe"
+    state = AgentState(
+        downloaded_paths=[str(minimal_pe_path.path)],
+        expected_label=0,
+        hash_metadata={
+            sha: {
+                "first_seen": "2024-01-01 00:00:00",
+                "expected_label": 0,
+                "source_provider": "sysinternals",
+                "source_url": url,
+            }
+        },
+    )
+    out = data_validation(state)
+    assert len(out["downloaded_paths"]) == 1
+    row = tmp_paths["tracker"].get_sample(sha)
+    assert row["source_provider"] == "sysinternals"
+    assert row["source_url"] == url
+    assert tmp_paths["tracker"].is_source_url_seen(url)
+
+
 def test_data_validation_updates_pending_row(tmp_paths, minimal_pe_path):
     sha = minimal_pe_path.sha256
     tracker = tmp_paths["tracker"]
@@ -148,6 +171,7 @@ def test_binary_fetch_uses_candidate_provider(mock_download, mock_intel_cls, tmp
 
     assert len(out["downloaded_paths"]) == 2
     assert out["bootstrap_metrics"]["downloaded_count"] == 2
+    assert all("source_url" in meta for meta in out["hash_metadata"].values())
     assert mock_download.call_count == 2
 
 

@@ -15,11 +15,19 @@ logger = logging.getLogger(__name__)
 
 def _known_bad_or_downloaded(candidate: SampleCandidate, tracker: db.MalwareTracker) -> bool:
     sha = str(candidate.download_ref.get("sha256") or candidate.external_id).lower()
-    return len(sha) == 64 and (
+    if len(sha) == 64 and (
         tracker.is_downloaded(sha)
         or tracker.is_corrupted(sha)
         or tracker.is_pending(sha)
+    ):
+        return True
+    source_url = str(
+        candidate.download_ref.get("url")
+        or candidate.download_ref.get("fallback_url")
+        or candidate.metadata.get("source_url")
+        or ""
     )
+    return bool(source_url and tracker.is_source_url_seen(source_url))
 
 
 def _candidate_key(candidate: SampleCandidate) -> str:

@@ -73,6 +73,14 @@ def binary_fetch(state: AgentState) -> dict:
             meta["first_seen"] = meta.get("first_seen") or db.MalwareTracker.utc_now_iso()
             meta["expected_label"] = candidate.expected_label
             meta["source_provider"] = candidate.provider
+            source_url = (
+                candidate.download_ref.get("url")
+                or candidate.download_ref.get("fallback_url")
+                or candidate.metadata.get("source_url")
+                or ""
+            )
+            if source_url:
+                meta["source_url"] = source_url
             metadata[sha] = meta
             intel.record_download_outcome(meta, success=True)
         except Exception as exc:

@@ -88,6 +88,8 @@ Dynamic CTI uses a Hybrid Strict policy: CTI pages are used only as evidence for
 | `status` | `pending`, `active`, or `corrupted` |
 | `reject_reason` | raw rejection/parse reason |
 | `rejected_at` | rejection timestamp |
+| `source_provider` | originating provider when known |
+| `source_url` | originating URL when known; used to avoid re-fetching URL-only benign assets |
 
 ThreatIntelIngest discovers sources, validates hashes, and loads pending malware rows where `file_path=''` and `status` is `pending` or `active`. Rows marked `corrupted` are not retried.
 

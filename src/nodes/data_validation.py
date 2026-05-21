@@ -84,7 +84,15 @@ def data_validation(state: AgentState) -> dict:
             update_file_path(tracker, sha, path)
             logger.info("Updated pending row with file_path: %s", sha)
         else:
-            insert_sample(tracker, sha, path, acquired, label=label)
+            insert_sample(
+                tracker,
+                sha,
+                path,
+                acquired,
+                label=label,
+                source_provider=meta.get("source_provider"),
+                source_url=meta.get("source_url"),
+            )
 
         valid_paths.append(path)
         valid_hashes.append(sha)
