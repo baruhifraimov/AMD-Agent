@@ -22,6 +22,7 @@ from src.nodes import (
     threat_intel_ingest,
     data_validation,
     drift_monitor,
+    evaluation_node,
     explain_drift_context,
     feature_extraction,
     model_retrain,
@@ -88,6 +89,7 @@ def build_graph():
     graph.add_node("classifier_inference", _wrap(classifier_inference))
     graph.add_node("explain_drift_context", _wrap(explain_drift_context))
     graph.add_node("model_retrain", _wrap(model_retrain))
+    graph.add_node("evaluation", _wrap(evaluation_node))
 
     graph.add_edge(START, "source_selector")
     graph.add_conditional_edges(
@@ -118,9 +120,10 @@ def build_graph():
             "retrain": "explain_drift_context",
         },
     )
-    graph.add_edge("classifier_inference", END)
+    graph.add_edge("classifier_inference", "evaluation")
     graph.add_edge("explain_drift_context", "model_retrain")
-    graph.add_edge("model_retrain", END)
+    graph.add_edge("model_retrain", "evaluation")
+    graph.add_edge("evaluation", END)
 
     return graph.compile(checkpointer=_CHECKPOINTER)
 
@@ -144,17 +147,6 @@ def run_pipeline() -> AgentState:
     )
     if final.semantic_report:
         logger.info("Report: %s", final.semantic_report)
-
-    try:
-        from src.evaluation import append_eval_log, plot_performance_decay, run_tesseract_eval
-
-        metrics = run_tesseract_eval()
-        if metrics:
-            append_eval_log(metrics)
-            plot_performance_decay()
-            logger.info("TESSERACT eval: %s", metrics)
-    except Exception as exc:
-        logger.debug("Post-run eval skipped: %s", exc)
 
     return final
 

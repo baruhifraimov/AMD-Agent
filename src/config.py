@@ -19,6 +19,7 @@ if _in_container:
     MODEL_PATH = Path("/data/models/model.pkl")
     ADWIN_PATH = Path("/data/models/adwin.joblib")
     EVAL_LOG_PATH = Path("/data/evaluation_log.jsonl")
+    DRIFT_LOG_PATH = Path("/data/drift_log.jsonl")
     FIGURES_DIR = Path("/data/figures")
 else:
     SANDBOX_DIR = PROJECT_ROOT / "data" / "sandbox"
@@ -27,6 +28,7 @@ else:
     MODEL_PATH = PROJECT_ROOT / "data" / "models" / "model.pkl"
     ADWIN_PATH = PROJECT_ROOT / "data" / "models" / "adwin.joblib"
     EVAL_LOG_PATH = PROJECT_ROOT / "data" / "evaluation_log.jsonl"
+    DRIFT_LOG_PATH = PROJECT_ROOT / "data" / "drift_log.jsonl"
     FIGURES_DIR = PROJECT_ROOT / "report" / "figures"
 
 REPLAY_BUDGET = 2000
@@ -323,6 +325,7 @@ def ensure_dirs() -> None:
         MODEL_PATH.parent,
         BENIGN_DIR,
         FIGURES_DIR,
+        DRIFT_LOG_PATH.parent,
         THREATINGESTOR_ARTIFACT_DB.parent,
     ):
         path.mkdir(parents=True, exist_ok=True)

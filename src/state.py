@@ -33,3 +33,7 @@ class AgentState(BaseModel):
     intel_poll_stats: Dict[str, Any] = Field(default_factory=dict)
     intel_sources_polled: List[str] = Field(default_factory=list)
     bootstrap_metrics: Dict[str, Any] = Field(default_factory=dict)
+
+    drift_stats: Dict[str, float] = Field(default_factory=dict)
+    drift_pre_metrics: Dict[str, float] = Field(default_factory=dict)
+    pending_drift_log: bool = False

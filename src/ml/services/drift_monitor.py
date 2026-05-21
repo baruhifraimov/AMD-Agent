@@ -31,9 +31,10 @@ class DriftMonitorService:
         section_entropies: list[float],
         *,
         hash_metadata: dict[str, dict[str, Any]],
-    ) -> tuple[bool, list[dict[str, Any]]]:
+    ) -> tuple[bool, list[dict[str, Any]], dict[str, float]]:
         labeled_batch: list[dict[str, Any]] = []
         selected = self._selected_drift_indices()
+        any_drift = False
 
         for feats, entropy in zip(feature_vectors, section_entropies):
             sha = str(feats.get("sha256", "")).lower()
@@ -41,6 +42,7 @@ class DriftMonitorService:
             vector = self._drift_vector(feats, selected)
             if not self.monitor.update(entropy, vector=vector, observed_at=meta.get("first_seen")):
                 continue
+            any_drift = True
             label = self.resolver.resolve_label(sha, meta)
             if label is None:
                 logger.info(
@@ -52,7 +54,8 @@ class DriftMonitorService:
             row["label"] = label
             labeled_batch.append(row)
 
-        return bool(labeled_batch), labeled_batch
+        drift_stats = dict(self.monitor.last_stats) if any_drift else {}
+        return any_drift, labeled_batch, drift_stats
 
     @staticmethod
     def _selected_drift_indices() -> list[int]:

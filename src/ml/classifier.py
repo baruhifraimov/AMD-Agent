@@ -12,7 +12,6 @@ import lightgbm as lgb
 import numpy as np
 import pandas as pd
 from sklearn.metrics import roc_curve
-from sklearn.model_selection import train_test_split
 
 from src.config import (
     BENIGN_DIR,
@@ -31,6 +30,7 @@ from src.config import (
 )
 import src.db.tracker as db
 from src.ml.features import extract_pe_features, features_to_vector, vectorize_batch
+from src.ml.splits import stratified_split, temporal_split
 
 logger = logging.getLogger(__name__)
 
@@ -85,6 +85,7 @@ def save_bundle(
     selected_feature_indices: list[int] | None = None,
     optuna_best_params: dict[str, Any] | None = None,
     bootstrap_sanity_metrics: dict[str, float] | None = None,
+    split_metadata: dict[str, Any] | None = None,
 ) -> None:
     selected = selected_feature_indices or list(range(len(FEATURE_NAMES)))
     bundle: dict[str, Any] = {
@@ -101,6 +102,8 @@ def save_bundle(
         bundle["training_counts"] = {
             str(label): int(count) for label, count in training_counts.items()
         }
+    if split_metadata is not None:
+        bundle["split_metadata"] = split_metadata
     if bootstrap_sanity_metrics is not None:
         bundle["bootstrap_sanity_metrics"] = bootstrap_sanity_metrics
     _save_bundle_dict(bundle, path)
@@ -173,16 +176,56 @@ def _binary_metrics(y_true: np.ndarray, scores: np.ndarray, threshold: float) ->
     }
 
 
-def _lgbm_default_params() -> dict[str, Any]:
+def _adaptive_min_data_in_leaf(n_train: int) -> int:
+    return max(5, n_train // 20)
+
+
+def _lgbm_default_params(n_train: int | None = None) -> dict[str, Any]:
+    n = max(1, int(n_train or 100))
     return {
         "n_estimators": 150,
         "learning_rate": 0.05,
         "max_depth": -1,
         "num_leaves": 31,
-        "min_data_in_leaf": 50,
+        "min_data_in_leaf": _adaptive_min_data_in_leaf(n),
+        "class_weight": "balanced",
         "random_state": 42,
         "verbose": -1,
     }
+
+
+def _min_leaf_optuna_bounds(n_train: int) -> tuple[int, int]:
+    floor = 5 if n_train < 500 else 20
+    adaptive = _adaptive_min_data_in_leaf(n_train)
+    return floor, max(adaptive, floor + 10, 80)
+
+
+def _fit_lightgbm(
+    model: lgb.LGBMClassifier,
+    X_train: np.ndarray,
+    y_train: np.ndarray,
+    *,
+    feature_names: list[str],
+    X_val: np.ndarray | None = None,
+    y_val: np.ndarray | None = None,
+) -> lgb.LGBMClassifier:
+    train_frame = _feature_frame(X_train, feature_names)
+    if (
+        X_val is not None
+        and y_val is not None
+        and len(y_val) > 0
+        and len(np.unique(y_val)) == 2
+    ):
+        val_frame = _feature_frame(X_val, feature_names)
+        model.fit(
+            train_frame,
+            y_train,
+            eval_set=[(val_frame, y_val)],
+            callbacks=[lgb.early_stopping(20, verbose=False)],
+        )
+        return model
+    model.fit(train_frame, y_train)
+    return model
 
 
 def _apply_selected(X: np.ndarray, selected: list[int] | np.ndarray) -> np.ndarray:
@@ -244,7 +287,7 @@ def _optimize_lightgbm_params(
     optimize: bool,
     feature_names: list[str],
 ) -> dict[str, Any]:
-    base = _lgbm_default_params()
+    base = _lgbm_default_params(len(y_train))
     if (
         not optimize
         or optuna is None
@@ -254,6 +297,7 @@ def _optimize_lightgbm_params(
     ):
         return base
 
+    leaf_low, leaf_high = _min_leaf_optuna_bounds(len(y_train))
     optuna.logging.set_verbosity(optuna.logging.WARNING)
 
     def objective(trial: Any) -> float:
@@ -261,10 +305,17 @@ def _optimize_lightgbm_params(
             **base,
             "num_leaves": trial.suggest_int("num_leaves", 31, 64),
             "n_estimators": trial.suggest_int("n_estimators", 100, 500),
-            "min_data_in_leaf": trial.suggest_int("min_data_in_leaf", 50, 150),
+            "min_data_in_leaf": trial.suggest_int("min_data_in_leaf", leaf_low, leaf_high),
         }
         model = lgb.LGBMClassifier(**params)
-        model.fit(_feature_frame(X_train, feature_names), y_train)
+        _fit_lightgbm(
+            model,
+            X_train,
+            y_train,
+            feature_names=feature_names,
+            X_val=X_val,
+            y_val=y_val,
+        )
         scores = predict_proba(model, X_val, feature_names=feature_names)
         threshold = fit_threshold(y_val, scores)
         return _trial_score(y_val, scores, threshold)
@@ -280,44 +331,33 @@ def _optimize_lightgbm_params(
     return base
 
 
-def _stratified_split(
-    X: np.ndarray,
-    y: np.ndarray,
+def _split_metadata(
     *,
-    val_fraction: float,
-    test_fraction: float = 0.0,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    indices = np.arange(len(y))
-    holdout_fraction = val_fraction + test_fraction
-    if holdout_fraction <= 0:
-        return X, y, np.empty((0, X.shape[1])), np.array([]), np.empty((0, X.shape[1])), np.array([])
+    split_mode: str,
+    y_train: np.ndarray,
+    y_val: np.ndarray,
+    y_test: np.ndarray | None = None,
+) -> dict[str, Any]:
+    meta: dict[str, Any] = {
+        "split_mode": split_mode,
+        "train_class_counts": class_counts_from_labels(y_train),
+        "val_class_counts": class_counts_from_labels(y_val) if len(y_val) else {},
+    }
+    if y_test is not None and len(y_test):
+        meta["test_class_counts"] = class_counts_from_labels(y_test)
+    return meta
 
-    try:
-        train_idx, holdout_idx = train_test_split(
-            indices,
-            test_size=holdout_fraction,
-            stratify=y,
-            random_state=42,
-        )
-        if test_fraction > 0:
-            test_share = test_fraction / holdout_fraction
-            val_idx, test_idx = train_test_split(
-                holdout_idx,
-                test_size=test_share,
-                stratify=y[holdout_idx],
-                random_state=43,
-            )
-        else:
-            val_idx = holdout_idx
-            test_idx = np.array([], dtype=int)
-    except ValueError:
-        train_end = int(len(y) * (1 - holdout_fraction))
-        val_end = int(len(y) * (1 - test_fraction))
-        train_idx = indices[:train_end]
-        val_idx = indices[train_end:val_end]
-        test_idx = indices[val_end:]
 
-    return X[train_idx], y[train_idx], X[val_idx], y[val_idx], X[test_idx], y[test_idx]
+def _resolve_selected_features(
+    X_train: np.ndarray,
+    y_train: np.ndarray,
+    frozen_feature_indices: list[int] | None,
+) -> list[int]:
+    if frozen_feature_indices is not None:
+        valid = [i for i in frozen_feature_indices if 0 <= i < X_train.shape[1]]
+        if valid:
+            return valid
+    return _rank_features_xgboost(X_train, y_train, FEATURE_SELECTION_K)
 
 
 def fit_model_artifact(
@@ -329,10 +369,12 @@ def fit_model_artifact(
     training_counts: dict[int, int] | None = None,
     optimize: bool = True,
     bootstrap_sanity_metrics: dict[str, float] | None = None,
+    frozen_feature_indices: list[int] | None = None,
+    split_mode: str = "temporal",
 ) -> dict[str, Any]:
     if len(np.unique(y_train)) < 2:
         raise ValueError("training split has fewer than 2 classes")
-    selected = _rank_features_xgboost(X_train, y_train, FEATURE_SELECTION_K)
+    selected = _resolve_selected_features(X_train, y_train, frozen_feature_indices)
     selected_names = [FEATURE_NAMES[i] for i in selected]
     X_train_sel = _apply_selected(X_train, selected)
     X_val_sel = _apply_selected(X_val, selected) if len(y_val) else np.empty((0, len(selected)))
@@ -345,7 +387,14 @@ def fit_model_artifact(
         feature_names=selected_names,
     )
     model = lgb.LGBMClassifier(**params)
-    model.fit(_feature_frame(X_train_sel, selected_names), y_train)
+    _fit_lightgbm(
+        model,
+        X_train_sel,
+        y_train,
+        feature_names=selected_names,
+        X_val=X_val_sel if len(y_val) else None,
+        y_val=y_val if len(y_val) else None,
+    )
     val_scores = predict_proba(model, X_val_sel, feature_names=selected_names) if len(y_val) else np.array([])
     threshold = fit_threshold(y_val, val_scores) if len(y_val) else 0.5
     bundle: dict[str, Any] = {
@@ -357,6 +406,11 @@ def fit_model_artifact(
         "selected_feature_indices": selected,
         "selected_feature_names": selected_names,
         "optuna_best_params": params,
+        "split_metadata": _split_metadata(
+            split_mode=split_mode,
+            y_train=y_train,
+            y_val=y_val,
+        ),
     }
     if training_counts is not None:
         bundle["training_counts"] = {
@@ -489,15 +543,16 @@ def cold_start_train(tracker: db.MalwareTracker) -> dict[str, Any] | None:
         )
         return None
 
-    X_train, y_train, X_val, y_val, X_test, y_test = _stratified_split(
+    X_train, y_train, X_val, y_val, X_test, y_test = temporal_split(
         X,
         y,
-        val_fraction=0.15,
-        test_fraction=0.15,
+        train_ratio=0.7,
+        val_ratio=0.15,
+        test_ratio=0.15,
     )
     if len(np.unique(y_train)) < 2:
         logger.warning(
-            "Cold-start skipped: stratified train split has fewer than 2 classes "
+            "Cold-start skipped: temporal train split has fewer than 2 classes "
             "(n_train=%d, classes=%s)",
             len(y_train),
             np.unique(y_train).tolist(),
@@ -512,16 +567,27 @@ def cold_start_train(tracker: db.MalwareTracker) -> dict[str, Any] | None:
             y_val,
             training_counts=counts,
             optimize=True,
+            split_mode="temporal",
         )
     except ValueError as exc:
         logger.warning("Cold-start skipped: %s", exc)
         return None
 
-    if len(y_test) and len(np.unique(y_test)) == 2:
-        test_scores = _score_matrix(bundle, X_test)
-        sanity = _binary_metrics(y_test, test_scores, float(bundle.get("threshold", 0.5)))
+    _, _, _, _, X_sanity, y_sanity = stratified_split(
+        X,
+        y,
+        val_fraction=0.0,
+        test_fraction=0.15,
+    )
+    if len(y_sanity) and len(np.unique(y_sanity)) == 2:
+        sanity_scores = _score_matrix(bundle, X_sanity)
+        sanity = _binary_metrics(y_sanity, sanity_scores, float(bundle.get("threshold", 0.5)))
         bundle["bootstrap_sanity_metrics"] = sanity
-        logger.info("Bootstrap sanity eval: %s", sanity)
+        meta = dict(bundle.get("split_metadata") or {})
+        meta["sanity_split_mode"] = "stratified"
+        meta["sanity_class_counts"] = class_counts_from_labels(y_sanity)
+        bundle["split_metadata"] = meta
+        logger.info("Bootstrap stratified sanity eval: %s", sanity)
 
     _save_bundle_dict(bundle)
     logger.info(
@@ -540,8 +606,9 @@ def retrain_model(
     y: np.ndarray,
     *,
     val_fraction: float = 0.15,
+    frozen_feature_indices: list[int] | None = None,
 ) -> dict[str, Any] | None:
-    """Retrain LightGBM and tune threshold on a stratified validation split."""
+    """Retrain LightGBM with a chronological validation split."""
     if len(np.unique(y)) < 2:
         logger.warning(
             "Retrain skipped: y contains fewer than 2 classes (n=%d, classes=%s); "
@@ -551,10 +618,12 @@ def retrain_model(
         )
         return load_bundle()
 
-    X_train, y_train, X_val, y_val, _, _ = _stratified_split(
+    train_ratio = max(0.5, 1.0 - val_fraction)
+    X_train, y_train, X_val, y_val, _, _ = temporal_split(
         X,
         y,
-        val_fraction=val_fraction,
+        train_ratio=train_ratio,
+        val_ratio=val_fraction,
     )
     if len(np.unique(y_train)) < 2:
         logger.warning(
@@ -565,6 +634,14 @@ def retrain_model(
         )
         return load_bundle()
 
+    frozen = frozen_feature_indices
+    if frozen is None:
+        existing = load_bundle()
+        if existing and _bundle_feature_compatible(existing):
+            raw = existing.get("selected_feature_indices")
+            if isinstance(raw, list) and raw:
+                frozen = [int(i) for i in raw]
+
     try:
         bundle = fit_model_artifact(
             X_train,
@@ -573,6 +650,8 @@ def retrain_model(
             y_val,
             training_counts=class_counts_from_labels(y),
             optimize=True,
+            frozen_feature_indices=frozen,
+            split_mode="temporal",
         )
     except ValueError as exc:
         logger.warning("Retrain skipped: %s", exc)
