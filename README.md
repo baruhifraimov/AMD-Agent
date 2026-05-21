@@ -178,6 +178,7 @@ Other useful variables:
 | `AMD_BENIGN_PROVIDER` | force benign provider: `sysinternals` or `github` |
 | `AMD_ALLOW_LOCAL_BENIGN` | ingest `data/benign/*` as label `0` |
 | `AMD_INTEL_INGEST_ENABLED` | enable/disable integrated threat intel ingest node |
+| `AMD_CTI_SEED_SOURCES_ENABLED` | seed known CTI feeds into `intel_sources` before polling (default `1`) |
 | `AMD_INTEL_MIN_POLL_INTERVAL` | minimum seconds between polls per high-yield source |
 | `AMD_INTEL_MAX_POLL_INTERVAL` | maximum seconds between polls per low-yield source |
 | `AMD_INTEL_PENDING_CAP_MULT` | skip polling when pending queue exceeds `PE_FETCH_LIMIT * mult` |
@@ -305,9 +306,15 @@ Dual-path malware IOC collection:
 1. **[InQuest ThreatIngestor](https://github.com/InQuest/ThreatIngestor)** sidecar — curated RSS/plugin feeds → `/data/threatingestor_artifacts.db`
 2. **ThreatIntelCollector** (in-process) — polls TI artifacts, validates, queues; plus runtime feed discovery via `intel_sources`
 
+The native collector seeds high-signal public CTI feeds on every steady-state
+pass (DFIR Report, Cisco Talos, Google Threat Intelligence, CISA advisories,
+Unit42, Securelist, and Malwarebytes) before falling back to DDG-based source
+discovery. Search results from academic/paywalled hosts are ignored because they
+rarely produce actionable PE SHA256 indicators.
+
 | Capability | Implementation |
 |---|---|
-| Curated CTI feeds | `threatingestor` Compose service + `threatingestor_config.yml` |
+| Curated CTI feeds | `src/intel/seed_sources.py` for in-process polling, plus `threatingestor_config.yml` for the sidecar |
 | Artifact ingest | `src/intel/threatingestor_artifacts.py` polled by `threat_intel_ingest` |
 | Dynamic source discovery | Web search + LLM → `intel_sources` (native `feedparser` polls) |
 | Upstream validation | SHA256 + MalwareBazaar `is_pe_hash` before pending insert |
@@ -334,6 +341,7 @@ docker compose up threatingestor
 | `AMD_THREATINGESTOR_SLEEP_BOOTSTRAP` | Seconds between TI passes until 100/100 trainable samples (default `60`) |
 | `AMD_THREATINGESTOR_SLEEP_STEADY` | Seconds between TI passes after initial collection (default `900`) |
 | `AMD_INTEL_INGEST_ENABLED` | Enable `threat_intel_ingest` node |
+| `AMD_CTI_SEED_SOURCES_ENABLED` | Keep curated CTI feeds enabled in the native source registry |
 
 Pending row contract:
 

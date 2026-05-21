@@ -12,6 +12,7 @@ def test_validate_rejects_invalid_sha(tmp_paths):
         use_semantic_filter=False,
     )
     assert stats["ignored"] == 1
+    assert stats["invalid_format"] == 1
     assert stats["queued"] == 0
 
 
@@ -53,4 +54,5 @@ def test_validate_rejects_non_pe_on_mb(mock_pe, tmp_paths):
         use_semantic_filter=False,
     )
     assert stats["rejected"] == 1
+    assert stats["not_pe"] == 1
     assert tmp_paths["tracker"].fetch_pending_hashes() == []

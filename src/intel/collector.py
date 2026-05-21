@@ -8,6 +8,7 @@ from typing import Any
 
 import src.db.tracker as db
 from src.config import (
+    CTI_SEED_SOURCES_ENABLED,
     MIN_TRAIN_MALWARE,
     PE_FETCH_LIMIT,
     THREATINGESTOR_BRIDGE_BATCH,
@@ -17,8 +18,9 @@ from src.intel.threatingestor_artifacts import (
     finalize_threatingestor_marks,
     poll_threatingestor_artifacts,
 )
-from src.intel.feed_discovery import discover_candidate_urls
+from src.intel.feed_discovery import discover_candidate_urls, is_low_signal_cti_url
 from src.intel.rss import parse_feed_entries
+from src.intel.seed_sources import seed_curated_sources
 from src.intel.source_store import IntelSourceStore, get_intel_source_store
 from src.llm import semantic_filter_hashes
 from src.sources.base import SampleCandidate
@@ -43,6 +45,12 @@ class ThreatIntelCollector:
         self.tracker = tracker or db.get_tracker()
         self.sources = source_store or get_intel_source_store(self.tracker.db_path)
         self._pe_hash_cache: dict[str, bool] = {}
+        self.last_native_poll_stats: dict[str, Any] = {}
+
+    def seed_curated_sources(self) -> dict[str, Any]:
+        if not CTI_SEED_SOURCES_ENABLED:
+            return {"enabled": 0, "seeded": 0}
+        return seed_curated_sources(self.sources)
 
     def discover_sources(
         self,
@@ -77,6 +85,17 @@ class ThreatIntelCollector:
     ) -> list[dict[str, Any]]:
         """Poll feeds due for refresh and return raw IOC candidates."""
         due = self.sources.list_due_sources(limit=max_sources)
+        poll_stats: dict[str, Any] = {
+            "sources_due": len(due),
+            "sources_polled": 0,
+            "entries": 0,
+            "pages_fetched": 0,
+            "raw_hashes": 0,
+            "raw_pe_urls": 0,
+            "returned": 0,
+            "sources_disabled": 0,
+            "source_urls": [],
+        }
         raw: list[dict[str, Any]] = []
         seen_hashes: set[str] = set()
         seen_urls: set[str] = set()
@@ -85,7 +104,14 @@ class ThreatIntelCollector:
             source_id = int(source["id"])
             url = str(source["url"])
             source_type = str(source.get("source_type") or "rss")
+            if is_low_signal_cti_url(url):
+                logger.info("Disabling low-signal CTI source: %s", url)
+                self.sources.disable_source(source_id)
+                poll_stats["sources_disabled"] += 1
+                continue
             self.sources.record_poll_start(source_id)
+            poll_stats["sources_polled"] += 1
+            poll_stats["source_urls"].append(url)
 
             entries: list[dict[str, Any]] = []
             if source_type == "rss":
@@ -96,6 +122,7 @@ class ThreatIntelCollector:
                     entries = [{"title": "", "link": url, "body": text, "feed_url": url}]
             elif source_type == "github":
                 entries = [{"title": "", "link": url, "body": url, "feed_url": url}]
+            poll_stats["entries"] += len(entries)
 
             for entry in entries:
                 combined = " ".join(
@@ -104,6 +131,8 @@ class ThreatIntelCollector:
                 link = entry.get("link") or url
                 if link and link != url:
                     page = fetch_public_text(link)
+                    if page:
+                        poll_stats["pages_fetched"] += 1
                     combined = f"{combined} {page}"
 
                 for ctx in extract_hash_contexts(combined, url=link):
@@ -123,6 +152,7 @@ class ThreatIntelCollector:
                             "discovery_source": "intel_rss",
                         }
                     )
+                    poll_stats["raw_hashes"] += 1
                     if len(raw) >= max_candidates:
                         break
 
@@ -140,11 +170,15 @@ class ThreatIntelCollector:
                             "discovery_source": "intel_url",
                         }
                     )
+                    poll_stats["raw_pe_urls"] += 1
 
                 if len(raw) >= max_candidates:
                     break
 
-        return raw[:max_candidates]
+        out = raw[:max_candidates]
+        poll_stats["returned"] = len(out)
+        self.last_native_poll_stats = poll_stats
+        return out
 
     def poll_threatingestor_artifacts(
         self,
@@ -190,10 +224,16 @@ class ThreatIntelCollector:
 
         stats: dict[str, Any] = {
             "seen": 0,
+            "hash_candidates": 0,
+            "url_candidates": 0,
             "queued": 0,
             "rejected": 0,
             "existing": 0,
             "ignored": 0,
+            "invalid_format": 0,
+            "semantic_rejected": 0,
+            "corrupted": 0,
+            "not_pe": 0,
             "queued_hashes": [],
             "existing_hashes": [],
         }
@@ -201,8 +241,11 @@ class ThreatIntelCollector:
         ti_items = [c for c in candidates if c.get("_ti_artifact")]
         hash_items = [c for c in candidates if c.get("sha256")]
         url_items = [c for c in candidates if c.get("fallback_url") and not c.get("sha256")]
+        stats["hash_candidates"] = len(hash_items)
+        stats["url_candidates"] = len(url_items)
 
         if use_semantic_filter and hash_items:
+            before_semantic = len(hash_items)
             filtered = semantic_filter_hashes(
                 [
                     {
@@ -215,6 +258,7 @@ class ThreatIntelCollector:
             )
             accepted_shas = {str(i.get("sha256", "")).lower() for i in filtered}
             hash_items = [h for h in hash_items if h["sha256"] in accepted_shas]
+            stats["semantic_rejected"] = max(0, before_semantic - len(hash_items))
             for item in filtered:
                 sha = str(item.get("sha256", "")).lower()
                 for raw in candidates:
@@ -228,9 +272,11 @@ class ThreatIntelCollector:
 
             if not SHA256_RE.fullmatch(sha):
                 stats["ignored"] += 1
+                stats["invalid_format"] += 1
                 continue
             if self.tracker.is_corrupted(sha):
                 stats["rejected"] += 1
+                stats["corrupted"] += 1
                 continue
             if self.tracker.hash_exists(sha):
                 stats["existing"] += 1
@@ -239,6 +285,7 @@ class ThreatIntelCollector:
             try:
                 if not self._is_pe_hash_cached(sha):
                     stats["rejected"] += 1
+                    stats["not_pe"] += 1
                     continue
             except mb.MalwareBazaarUnavailable:
                 logger.warning("MB circuit open; aborting validate_and_queue PE checks")
@@ -329,17 +376,28 @@ class ThreatIntelCollector:
         from src.config import CTI_PAGE_LIMIT
         from src.tools.cti_search import web_search
 
-        q = queries or []
+        curated_queries = [
+            "site:thedfirreport.com sha256 malware",
+            "site:blog.talosintelligence.com sha256 malware",
+            "site:cloud.google.com/blog/topics/threat-intelligence sha256 malware",
+            "site:github.com ioc sha256 malware windows pe",
+        ]
+        q = list(queries or [])
         if not q:
             from src.llm import generate_cti_queries
 
             q = generate_cti_queries(
                 [
+                    *curated_queries,
                     "recent Windows PE malware sha256 hashes github",
-                    "recent malware campaign sha256 PE hashes",
                 ],
                 limit=3,
             )
+        for query in curated_queries:
+            if query not in q:
+                q.append(query)
+            if len(q) >= 6:
+                break
         evidence: list[dict[str, Any]] = []
         visited: set[str] = set()
         for query in q:
@@ -348,6 +406,9 @@ class ThreatIntelCollector:
                     break
                 url = result["url"]
                 if url in visited:
+                    continue
+                if is_low_signal_cti_url(url):
+                    logger.info("Skipping low-signal CTI page: %s", url)
                     continue
                 visited.add(url)
                 page = fetch_public_text(url)
@@ -411,6 +472,8 @@ class ThreatIntelCollector:
         max_candidates: int = 50,
     ) -> dict[str, Any]:
         result: dict[str, Any] = {}
+        if CTI_SEED_SOURCES_ENABLED:
+            result["seed_sources"] = self.seed_curated_sources()
         if discover or self.sources.count_enabled() == 0:
             result["discover"] = self.discover_sources(max_sources=max_sources)
         raw: list[dict[str, Any]] = []
@@ -422,6 +485,7 @@ class ThreatIntelCollector:
                 max_sources=max_sources,
                 max_candidates=max_candidates,
             )
+            result["native_sources"] = self.last_native_poll_stats
             raw.extend(native_raw)
         result["poll_count"] = len(raw)
         result["validate"] = self.validate_and_queue(raw)

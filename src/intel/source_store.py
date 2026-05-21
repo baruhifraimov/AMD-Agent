@@ -82,19 +82,22 @@ class IntelSourceStore:
         *,
         source_type: str = "rss",
         discovery_query: str = "",
+        reset_zero_yield: bool = False,
     ) -> int | None:
         """Insert or refresh a discovered source. Returns source id."""
         now = _utc_now_iso()
         next_poll = now
+        zero_yield_sql = ", zero_yield_polls = 0" if reset_zero_yield else ""
         with self._connect() as conn:
             conn.execute(
-                """
+                f"""
                 INSERT INTO intel_sources (url, source_type, discovered_at, next_poll_at, discovery_query)
                 VALUES (?, ?, ?, ?, ?)
                 ON CONFLICT(url) DO UPDATE SET
                     source_type = excluded.source_type,
                     discovery_query = COALESCE(excluded.discovery_query, intel_sources.discovery_query),
                     enabled = 1
+                    {zero_yield_sql}
                 """,
                 (url.strip(), source_type, now, next_poll, discovery_query or None),
             )
@@ -187,6 +190,13 @@ class IntelSourceStore:
                     "UPDATE intel_sources SET yield_ratio = ? WHERE id = ?",
                     (ratio, source_id),
                 )
+
+    def disable_source(self, source_id: int) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                "UPDATE intel_sources SET enabled = 0 WHERE id = ?",
+                (source_id,),
+            )
 
     def schedule_next_poll(
         self,

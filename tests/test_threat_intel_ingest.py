@@ -27,12 +27,21 @@ def test_ingest_empty_when_disabled():
 def test_ingest_merges_threatingestor_and_native(mock_cls, _mock_ctx, tmp_paths):
     mock_coll = mock_cls.return_value
     mock_coll.sources.count_enabled.return_value = 1
+    mock_coll.seed_curated_sources.return_value = {"enabled": 1, "seeded": 0}
     mock_coll.discover_sources.return_value = {"upserted": 0}
     mock_coll.poll_threatingestor_artifacts.return_value = (
         [{"sha256": "a" * 64, "discovery_source": "intel_threatingestor"}],
         {"candidates": 1},
     )
     mock_coll.poll_due_feeds.return_value = [{"sha256": "b" * 64, "discovery_source": "intel_rss"}]
+    mock_coll.last_native_poll_stats = {
+        "sources_polled": 1,
+        "sources_disabled": 0,
+        "entries": 1,
+        "raw_hashes": 1,
+        "raw_pe_urls": 0,
+        "returned": 1,
+    }
     mock_coll.validate_and_queue.return_value = {"queued": 1}
     mock_coll.pending_to_candidates.return_value = []
     mock_coll.sources.all_sources.return_value = []
@@ -54,9 +63,18 @@ def test_ingest_loads_pending_candidates(mock_cls, _mock_ctx, tmp_paths):
 
     mock_coll = mock_cls.return_value
     mock_coll.sources.count_enabled.return_value = 1
+    mock_coll.seed_curated_sources.return_value = {"enabled": 1, "seeded": 0}
     mock_coll.discover_sources.return_value = {"upserted": 0}
     mock_coll.poll_threatingestor_artifacts.return_value = ([], {"candidates": 0})
     mock_coll.poll_due_feeds.return_value = []
+    mock_coll.last_native_poll_stats = {
+        "sources_polled": 0,
+        "sources_disabled": 0,
+        "entries": 0,
+        "raw_hashes": 0,
+        "raw_pe_urls": 0,
+        "returned": 0,
+    }
     mock_coll.validate_and_queue.return_value = {"queued": 0}
     mock_coll.pending_to_candidates.return_value = [
         {

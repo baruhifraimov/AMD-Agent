@@ -13,6 +13,26 @@ general:
 credentials: []
 
 sources:
+  - name: rss-dfir-report
+    module: rss
+    url: https://thedfirreport.com/feed/
+    feed_type: messy
+
+  - name: rss-talos
+    module: rss
+    url: https://blog.talosintelligence.com/rss/
+    feed_type: messy
+
+  - name: rss-google-threat-intel
+    module: rss
+    url: https://feeds.feedburner.com/threatintelligence/pvexyqv7v0v
+    feed_type: messy
+
+  - name: rss-cisa-advisories
+    module: rss
+    url: https://www.cisa.gov/cybersecurity-advisories/all.xml
+    feed_type: messy
+
   - name: rss-unit42
     module: rss
     url: https://unit42.paloaltonetworks.com/feed/

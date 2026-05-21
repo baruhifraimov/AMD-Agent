@@ -14,13 +14,32 @@ from src.tools.cti_search import is_public_url, web_search
 logger = logging.getLogger(__name__)
 
 DEFAULT_DISCOVERY_QUERIES = [
-    "Windows PE malware analysis blog rss feed",
-    "malware sha256 indicators security blog feed",
-    "threat intelligence rss malware research",
+    "site:thedfirreport.com feed malware sha256",
+    "site:blog.talosintelligence.com rss malware sha256",
+    "site:cloud.google.com/blog/topics/threat-intelligence rss malware sha256",
+    "malware sha256 indicators rss feed",
 ]
 
 FEED_HINT_RE = re.compile(r"(feed|rss|atom|\.xml)", re.I)
 GITHUB_RE = re.compile(r"^https?://(?:www\.)?github\.com/[\w.-]+/[\w.-]+", re.I)
+LOW_SIGNAL_CTI_HOSTS = (
+    "coursehero.com",
+    "frontiersin.org",
+    "link.springer.com",
+    "mendeley.com",
+    "mdpi.com",
+    "researchgate.net",
+    "sciencedirect.com",
+    "springer.com",
+)
+
+
+def is_low_signal_cti_url(url: str) -> bool:
+    """Return True for hosts that tend to be academic/paywalled, not IOC feeds."""
+    host = (urlparse(url).hostname or "").lower()
+    if host.startswith("www."):
+        host = host[4:]
+    return any(host == blocked or host.endswith(f".{blocked}") for blocked in LOW_SIGNAL_CTI_HOSTS)
 
 
 def classify_url(url: str) -> str:
@@ -48,6 +67,9 @@ def discover_candidate_urls(
         for row in web_search(query, limit=8):
             url = row.get("url", "").strip()
             if not url or url in seen or not is_public_url(url):
+                continue
+            if is_low_signal_cti_url(url):
+                logger.info("Skipping low-signal CTI discovery result: %s", url)
                 continue
             seen.add(url)
             source_type = classify_url(url)

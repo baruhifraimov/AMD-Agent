@@ -51,6 +51,8 @@ def threat_intel_ingest(state: AgentState) -> dict:
     collector = ThreatIntelCollector(tracker=tracker)
     stats: dict = {}
 
+    stats["seed_sources"] = collector.seed_curated_sources()
+
     discover = _should_discover(collector, state)
     poll = _should_poll(tracker)
 
@@ -71,6 +73,17 @@ def threat_intel_ingest(state: AgentState) -> dict:
         native_raw = collector.poll_due_feeds(
             max_sources=max_sources,
             max_candidates=max_candidates,
+        )
+        stats["native_sources"] = collector.last_native_poll_stats
+        native_stats = collector.last_native_poll_stats
+        logger.info(
+            "Native CTI feeds: sources=%d disabled=%d entries=%d raw_hashes=%d pe_urls=%d returned=%d",
+            int(native_stats.get("sources_polled", 0)),
+            int(native_stats.get("sources_disabled", 0)),
+            int(native_stats.get("entries", 0)),
+            int(native_stats.get("raw_hashes", 0)),
+            int(native_stats.get("raw_pe_urls", 0)),
+            int(native_stats.get("returned", 0)),
         )
         raw.extend(native_raw)
 

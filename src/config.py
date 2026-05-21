@@ -52,6 +52,7 @@ INTEL_INGEST_ENABLED_ENV = "AMD_INTEL_INGEST_ENABLED"
 INTEL_MIN_POLL_INTERVAL_ENV = "AMD_INTEL_MIN_POLL_INTERVAL"
 INTEL_MAX_POLL_INTERVAL_ENV = "AMD_INTEL_MAX_POLL_INTERVAL"
 INTEL_PENDING_CAP_MULT_ENV = "AMD_INTEL_PENDING_CAP_MULT"
+CTI_SEED_SOURCES_ENABLED_ENV = "AMD_CTI_SEED_SOURCES_ENABLED"
 CTI_DOWNLOAD_ALLOWLIST_ENV = "AMD_CTI_DOWNLOAD_ALLOWLIST"
 CTI_SEARCH_BACKENDS_ENV = "AMD_CTI_SEARCH_BACKENDS"
 BRAVE_SEARCH_API_KEY_ENV = "AMD_BRAVE_SEARCH_API_KEY"
@@ -96,6 +97,10 @@ def intel_ingest_enabled() -> bool:
     return os.getenv(INTEL_INGEST_ENABLED_ENV, "1").strip() not in ("0", "false", "no")
 
 
+def cti_seed_sources_enabled() -> bool:
+    return os.getenv(CTI_SEED_SOURCES_ENABLED_ENV, "1").strip() not in ("0", "false", "no")
+
+
 def ollama_source_selection_enabled() -> bool:
     return os.getenv(OLLAMA_SOURCE_SELECTION_ENV, "1").strip() not in ("0", "false", "no")
 
@@ -111,6 +116,7 @@ def eval_skip_bootstrap() -> bool:
 THREAT_QUEUE_ENABLED = threat_queue_enabled()
 THREATINGESTOR_ENABLED = threatingestor_enabled()
 INTEL_INGEST_ENABLED = intel_ingest_enabled()
+CTI_SEED_SOURCES_ENABLED = cti_seed_sources_enabled()
 INTEL_MIN_POLL_INTERVAL = int(os.getenv(INTEL_MIN_POLL_INTERVAL_ENV, "60"))
 INTEL_MAX_POLL_INTERVAL = int(os.getenv(INTEL_MAX_POLL_INTERVAL_ENV, "3600"))
 INTEL_PENDING_CAP_MULT = int(os.getenv(INTEL_PENDING_CAP_MULT_ENV, "3"))
