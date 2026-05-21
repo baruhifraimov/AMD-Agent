@@ -78,6 +78,20 @@ def threat_intel_ingest(state: AgentState) -> dict:
     if raw:
         stats["validate"] = collector.validate_and_queue(raw)
 
+    validate_stats = stats.get("validate") or {}
+    ti_shas = {str(item.get("sha256", "")).lower() for item in ti_raw if item.get("sha256")}
+    ti_queued = ti_shas.intersection(set(validate_stats.get("queued_hashes", [])))
+    ti_existing = ti_shas.intersection(set(validate_stats.get("existing_hashes", [])))
+    logger.info(
+        "ThreatIngestor: seen=%d sha256=%d queued=%d existing=%d rejected=%d ignored_format=%d",
+        int(ti_stats.get("seen", 0)),
+        int(ti_stats.get("candidates", 0)),
+        len(ti_queued),
+        len(ti_existing),
+        max(0, int(ti_stats.get("candidates", 0)) - len(ti_queued) - len(ti_existing)),
+        int(ti_stats.get("ignored_format", 0)),
+    )
+
     candidates = collector.pending_to_candidates(limit=PE_FETCH_LIMIT)
     cti_evidence = dict(state.cti_evidence)
     for item in raw:
