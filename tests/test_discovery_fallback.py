@@ -234,7 +234,36 @@ def test_steady_phase_also_falls_back_to_ddg(mock_coll_cls):
         cti_queries=["malware sha256 pe"],
     )
     assert len(out) == 1
-    mock_coll.web_discover.assert_called_once_with(25, queries=["malware sha256 pe"])
+    mock_coll.web_discover.assert_called_once_with(5, queries=["malware sha256 pe"])
+
+
+@patch("src.intel.collector.ThreatIntelCollector")
+def test_configured_fallback_chain_can_skip_low_yield_providers(mock_coll_cls, monkeypatch):
+    monkeypatch.setattr("src.collection.discovery_chain.MALWARE_FALLBACK_PROVIDERS", ("threatfox",))
+    registry, _mb, tf, tw = _make_registry(
+        mb_discover=lambda _limit: [],
+        tf_discover=lambda _limit: [],
+        tw_discover=lambda _limit: [SampleCandidate("t" * 64, "twitter", 1, {"sha256": "t" * 64})],
+    )
+
+    tracker = MagicMock()
+    tracker.is_downloaded.return_value = False
+    tracker.is_corrupted.return_value = False
+    tracker.is_pending.return_value = False
+
+    ctx = CollectionContext(benign_count=0, malware_count=0, model_ready=False, pending_depth=0)
+    out = discover_with_fallback(
+        ["malwarebazaar"],
+        registry=registry,
+        tracker=tracker,
+        ctx=ctx,
+        expected_label=1,
+        limit=5,
+    )
+    assert out == []
+    tf.discover.assert_called_once()
+    tw.discover.assert_not_called()
+    mock_coll_cls.return_value.web_discover.assert_not_called()
 
 
 @patch("src.intel.collector.ThreatIntelCollector")

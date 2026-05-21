@@ -6,7 +6,7 @@ import logging
 
 import src.db.tracker as db
 from src.collection.context import CollectionContext, build_collection_context
-from src.config import PE_FETCH_LIMIT
+from src.config import MALWARE_FALLBACK_PROVIDERS, PE_FETCH_LIMIT
 from src.sources.base import SampleCandidate
 from src.sources.registry import SourceRegistry, get_registry
 
@@ -76,16 +76,19 @@ def discover_with_fallback(
     seen: set[str] = set()
     available = set(registry.list_names())
     provider_chain = list(dict.fromkeys(source_names))
+    primary_sources = set(provider_chain)
 
     if expected_label == 1:
-        for fallback in ("threatfox", "twitter", "dynamic_cti"):
+        for fallback in MALWARE_FALLBACK_PROVIDERS:
             if fallback in available and fallback not in provider_chain:
                 provider_chain.append(fallback)
 
     for source_name in provider_chain:
         if len(candidates) >= fetch_limit:
             break
-        request_limit = max((fetch_limit - len(candidates)) * 5, fetch_limit)
+        remaining = fetch_limit - len(candidates)
+        request_limit = fetch_limit * 5 if source_name in primary_sources else remaining
+        request_limit = max(request_limit, 1)
         provider_name = source_name
         try:
             if source_name == "dynamic_cti":

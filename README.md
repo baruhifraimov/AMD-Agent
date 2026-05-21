@@ -177,6 +177,7 @@ Other useful variables:
 | `AMD_OLLAMA_SOURCE_SELECTION` | bind intel `@tool`s for Ollama source selection |
 | `AMD_CTI_DOWNLOAD_ALLOWLIST` | comma-separated hosts allowed for direct PE URL fallback |
 | `AMD_PE_FETCH_LIMIT` | max candidates returned per discovery pass (default `10`) |
+| `AMD_MALWARE_FALLBACK_PROVIDERS` | malware fallback chain after primary discovery, e.g. `threatfox,dynamic_cti` |
 | `AMD_PE_DOWNLOAD_MAX_BYTES` | max bytes for allowlisted direct downloads |
 | `AMD_CAPA_RULES_DIR` | capa rules directory passed with `-r` |
 | `AMD_REPORT_LANGUAGE` | language for Ollama drift report |
