@@ -16,8 +16,14 @@ from sklearn.metrics import accuracy_score, precision_recall_fscore_support
 
 import src.config as cfg
 import src.db.tracker as db
-from src.ml.classifier import fit_threshold, load_bundle, model_bundle_ready, predict_proba
-from src.ml.features import features_to_vector
+from src.ml.classifier import (
+    build_training_arrays,
+    class_counts_from_labels,
+    fit_model_artifact,
+    load_bundle,
+    model_bundle_ready,
+    score_feature_matrix,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -33,11 +39,15 @@ def compute_metrics(
     )
     tn = int(np.sum((y_true == 0) & (y_pred == 0)))
     fp = int(np.sum((y_true == 0) & (y_pred == 1)))
+    tp = int(np.sum((y_true == 1) & (y_pred == 1)))
+    fn = int(np.sum((y_true == 1) & (y_pred == 0)))
     fpr = fp / (fp + tn) if (fp + tn) > 0 else 0.0
+    tpr = tp / (tp + fn) if (tp + fn) > 0 else 0.0
     return {
         "accuracy": acc,
         "precision": float(prec),
         "recall": float(rec),
+        "tpr": float(tpr),
         "fpr": float(fpr),
     }
 
@@ -50,25 +60,43 @@ def run_tesseract_eval(
 ) -> dict[str, float]:
     """Chronological split evaluation on labeled DB samples."""
     tracker = tracker or db.get_tracker()
-    rows = tracker.fetch_labeled_with_features()
-    if len(rows) < 5:
-        logger.warning("Insufficient samples for TESSERACT eval: %d", len(rows))
+    X, y, _ = build_training_arrays(tracker)
+    if len(y) < 5:
+        logger.warning("Insufficient samples for TESSERACT eval: %d", len(y))
         return {}
 
-    X = np.vstack([features_to_vector(r["features"]) for r in rows])
-    y = np.array([int(r["label"]) for r in rows], dtype=int)
     n = len(y)
     train_end = int(n * train_ratio)
     val_end = int(n * (train_ratio + val_ratio))
+    X_train, y_train = X[:train_end], y[:train_end]
+    X_val, y_val = X[train_end:val_end], y[train_end:val_end]
+    X_test, y_test = X[val_end:], y[val_end:]
 
-    bundle = load_bundle()
-    if not model_bundle_ready(bundle):
+    production_bundle = load_bundle()
+    if not model_bundle_ready(production_bundle):
+        return {}
+    if len(np.unique(y_train)) < 2:
+        logger.info("TESSERACT skipped: train split has a single class")
+        return {}
+    if len(np.unique(y_val)) < 2 or len(np.unique(y_test)) < 2:
+        logger.info("TESSERACT skipped: single-class temporal validation/test split")
         return {}
 
-    model = bundle["model"]
-    threshold = fit_threshold(y[train_end:val_end], predict_proba(model, X[train_end:val_end]))
-    test_scores = predict_proba(model, X[val_end:])
-    y_test = y[val_end:]
+    try:
+        temporal_bundle = fit_model_artifact(
+            X_train,
+            y_train,
+            X_val,
+            y_val,
+            training_counts=class_counts_from_labels(y_train),
+            optimize=False,
+        )
+    except ValueError as exc:
+        logger.info("TESSERACT skipped: %s", exc)
+        return {}
+
+    threshold = float(temporal_bundle.get("threshold", 0.5))
+    test_scores = score_feature_matrix(temporal_bundle, X_test)
     y_pred = (test_scores >= threshold).astype(int)
     metrics = compute_metrics(y_test, y_pred)
     metrics["threshold"] = threshold

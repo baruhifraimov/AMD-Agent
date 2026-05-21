@@ -8,7 +8,7 @@ from typing import Any
 import numpy as np
 from sklearn.ensemble import IsolationForest
 
-from src.config import FEATURE_NAMES, REPLAY_BUDGET
+from src.config import FEATURE_NAMES, REPLAY_BUDGET, REPLAY_FRACTION
 from src.ml.classifier import retrain_model
 from src.ml.features import features_to_vector, vectorize_batch
 
@@ -48,7 +48,8 @@ def madar_retrain(
     if X_hist.size == 0 and X_new.size == 0:
         raise ValueError("No features for MADAR retrain")
 
-    replay_idx = build_replay_indices(X_hist) if len(X_hist) else np.array([], dtype=int)
+    replay_budget = min(REPLAY_BUDGET, max(1, int(len(X_hist) * REPLAY_FRACTION))) if len(X_hist) else 0
+    replay_idx = build_replay_indices(X_hist, budget=replay_budget) if replay_budget else np.array([], dtype=int)
     n_features = len(FEATURE_NAMES)
     X_replay = X_hist[replay_idx] if len(replay_idx) else np.empty(
         (0, X_new.shape[1] if X_new.size else n_features)

@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterator
 
-from src.config import DB_PATH, ensure_dirs
+from src.config import DB_PATH, FEATURE_DIM, FEATURE_SET_VERSION, ensure_dirs
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS samples (
@@ -24,11 +24,14 @@ CREATE TABLE IF NOT EXISTS samples (
     reject_reason TEXT,
     rejected_at TEXT,
     source_provider TEXT,
-    source_url TEXT
+    source_url TEXT,
+    feature_version TEXT,
+    feature_dim INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_samples_acquired ON samples(acquired_at);
 CREATE INDEX IF NOT EXISTS idx_samples_status ON samples(status);
 CREATE INDEX IF NOT EXISTS idx_samples_source_url ON samples(source_url);
+CREATE INDEX IF NOT EXISTS idx_samples_feature_version ON samples(feature_version);
 """
 
 
@@ -74,6 +77,10 @@ class MalwareTracker:
             conn.execute("ALTER TABLE samples ADD COLUMN source_provider TEXT")
         if "source_url" not in columns:
             conn.execute("ALTER TABLE samples ADD COLUMN source_url TEXT")
+        if "feature_version" not in columns:
+            conn.execute("ALTER TABLE samples ADD COLUMN feature_version TEXT")
+        if "feature_dim" not in columns:
+            conn.execute("ALTER TABLE samples ADD COLUMN feature_dim INTEGER")
         conn.execute(
             """
             UPDATE samples
@@ -86,6 +93,7 @@ class MalwareTracker:
         )
         conn.execute("CREATE INDEX IF NOT EXISTS idx_samples_status ON samples(status)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_samples_source_url ON samples(source_url)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_samples_feature_version ON samples(feature_version)")
 
     def hash_exists(self, sha256: str) -> bool:
         with self._connect() as conn:
@@ -213,12 +221,14 @@ class MalwareTracker:
         source_url: str | None = None,
     ) -> None:
         features_json = json.dumps(features) if features is not None else None
+        feature_version = FEATURE_SET_VERSION if features is not None else None
+        feature_dim = FEATURE_DIM if features is not None else None
         with self._connect() as conn:
             conn.execute(
                 """
                 INSERT OR REPLACE INTO samples
-                (sha256, file_path, acquired_at, features_json, label, prediction, anomaly_score, status, reject_reason, rejected_at, source_provider, source_url)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                (sha256, file_path, acquired_at, features_json, label, prediction, anomaly_score, status, reject_reason, rejected_at, source_provider, source_url, feature_version, feature_dim)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     sha256.lower(),
@@ -233,6 +243,8 @@ class MalwareTracker:
                     rejected_at,
                     source_provider,
                     source_url,
+                    feature_version,
+                    feature_dim,
                 ),
             )
 
@@ -279,8 +291,14 @@ class MalwareTracker:
     def update_features(self, sha256: str, features: dict[str, Any]) -> None:
         with self._connect() as conn:
             conn.execute(
-                "UPDATE samples SET features_json = ? WHERE sha256 = ?",
-                (json.dumps(features), sha256.lower()),
+                """
+                UPDATE samples
+                SET features_json = ?,
+                    feature_version = ?,
+                    feature_dim = ?
+                WHERE sha256 = ?
+                """,
+                (json.dumps(features), FEATURE_SET_VERSION, FEATURE_DIM, sha256.lower()),
             )
 
     def update_prediction(self, sha256: str, prediction: float) -> None:
@@ -336,11 +354,14 @@ class MalwareTracker:
                 SELECT label, COUNT(*) as cnt FROM samples
                 WHERE label IS NOT NULL
                   AND features_json IS NOT NULL
+                  AND feature_version = ?
+                  AND feature_dim = ?
                   AND file_path IS NOT NULL
                   AND file_path != ''
                   AND COALESCE(status, 'active') = 'active'
                 GROUP BY label
-                """
+                """,
+                (FEATURE_SET_VERSION, FEATURE_DIM),
             ).fetchall()
         return {int(r["label"]): int(r["cnt"]) for r in rows}
 

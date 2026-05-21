@@ -28,9 +28,9 @@ START
 - `SourceDiscovery`: discovers samples from one or more registered providers.
 - `BinaryFetch`: downloads through each candidate's own provider, not a global provider.
 - `DataValidation`: checks MZ header, validates `PE\0\0` at `e_lfanew`, verifies filename SHA256, de-duplicates, skips known corrupted hashes, and syncs SQLite status.
-- `FeatureExtraction`: extracts 17 PE features (15 structural + string metrics) using `pefile`; parse failures are triaged and marked `corrupted`. Existing `model.pkl` with 15 features requires cold-start retrain.
-- `DriftMonitor`: uses River ADWIN over section entropy.
-- `ClassifierInference`: scores samples with LightGBM and FPR-aware thresholding.
+- `FeatureExtraction`: extracts a deterministic 2304-dimensional EMBER-like static vector: PE headers/directories, Authenticode metadata, warnings, byte and byte-entropy histograms, string distributions, hashed imports/exports/sections, and lightweight instruction features. Parse failures are triaged and marked `corrupted`.
+- `DriftMonitor`: uses River ADWIN over section entropy plus rolling multivariate shift checks over selected model features.
+- `ClassifierInference`: scores samples with an XGBoost-ranked, Optuna-tuned LightGBM pipeline and FPR-aware thresholding.
 - `ExplainDriftContext`: runs `capa -j -r <rules_dir>` and asks Ollama to produce a semantic drift report.
 - `ModelRetrain`: retrains with MADAR replay buffer. Single-class retrain batches are skipped safely.
 - `Evaluation`: runs TESSERACT-style chronological evaluation and computes AUT.
@@ -38,6 +38,8 @@ START
 The initial LightGBM model is not considered ready until SQLite contains at
 least 100 active malware samples and 100 active benign samples with extracted
 features. Pending hashes and corrupted rows do not count toward this threshold.
+Model bundles are also tied to `FEATURE_SET_VERSION`; older 17-feature bundles
+are treated as stale and retrained.
 
 ## Data Sources
 
@@ -82,6 +84,8 @@ Dynamic CTI uses a Hybrid Strict policy: CTI pages are used only as evidence for
 | `file_path` | sandbox path; empty string for pending queue rows |
 | `acquired_at` | acquisition timestamp |
 | `features_json` | extracted static PE features |
+| `feature_version` | feature schema version, e.g. `ember_static_v1` |
+| `feature_dim` | feature vector width, currently `2304` |
 | `label` | `1` malware, `0` benign |
 | `prediction` | LightGBM malicious probability |
 | `anomaly_score` | reserved anomaly score |
@@ -110,13 +114,14 @@ Python dependencies are split for Docker cache stability:
 
 Docker installs `requirements.base.txt` in a stable cached layer first. New direct dependencies added to `requirements.txt` are installed in a later small layer, so the base dependency set is not reinstalled.
 
-Base dependencies include:
+Installed dependencies include:
 
 - `langgraph`, `pydantic`
 - `langchain-ollama`, `langchain-core`
 - `httpx`, `beautifulsoup4`, `ddgs`
 - `pefile`, `pyzipper`, `flare-capa`
 - `river`, `lightgbm`, `scikit-learn`
+- `xgboost`, `optuna`, `capstone`
 - `numpy`, `pandas`, `joblib`, `matplotlib`
 - `pytest`, `pytest-httpx`
 - `feedparser`, `threatingestor[rss]`, `regex`
@@ -193,6 +198,12 @@ Other useful variables:
 | `AMD_BOOTSTRAP_MAX_RUNS` | max bootstrap graph passes before giving up (default `60`) |
 | `AMD_BOOTSTRAP_INTERVAL` | seconds between bootstrap passes (default `10`) |
 | `AMD_ADWIN_DELTA` | River ADWIN confidence bound (default `0.002`; higher = less sensitive) |
+| `AMD_DRIFT_WINDOW_DAYS` | target temporal window for multivariate drift tracking (default `60`) |
+| `AMD_DRIFT_MIN_WINDOW_SAMPLES` | minimum samples per rolling drift window (default `50`) |
+| `AMD_REPLAY_FRACTION` | historical data fraction used for MADAR replay, capped by `REPLAY_BUDGET` (default `0.3`) |
+| `AMD_FEATURE_SELECTION_K` | number of XGBoost-ranked features retained for LightGBM (default `384`) |
+| `AMD_OPTUNA_TRIALS` | LightGBM tuning trials (default `25`; set `0` to disable) |
+| `AMD_OPTUNA_TIMEOUT` | Optuna tuning timeout in seconds (default `300`) |
 | `AMD_MB_CIRCUIT_FAILURE_THRESHOLD` | consecutive MB 5xx/transport failures before circuit opens (default `3`) |
 | `AMD_MB_CIRCUIT_OPEN_SECONDS` | seconds to skip MB API calls while circuit is open (default `120`) |
 | `AMD_CTI_HOST_BLOCK_SECONDS_403` | block CTI host after HTTP 403 (default `900`) |
@@ -337,11 +348,17 @@ TESSERACT-style evaluation is implemented in `src/evaluation/tesseract.py`.
 
 It uses:
 
-- chronological train/validation/test splits,
+- chronological train/validation/test splits with a temporary temporal model,
 - accuracy, precision, recall, FPR,
 - dynamic threshold targeting `TARGET_FPR = 0.001`,
 - AUT (`Area Under Time`) over historical accuracy,
 - performance plot at `FIGURES_DIR/performance_decay.png`.
+
+If the temporal validation or test split contains only one class, TESSERACT is
+skipped instead of emitting misleading precision/recall. The cold-start trainer
+also logs a separate bootstrap sanity evaluation on a stratified holdout; that
+metric confirms the initial model learned a basic malware/benign separator but
+does not replace temporal TESSERACT reporting.
 
 Local default figure path:
 

@@ -4,7 +4,7 @@ from unittest.mock import patch
 
 import numpy as np
 
-from src.config import TARGET_FPR
+from src.config import FEATURE_DIM, TARGET_FPR
 from src.ml.classifier import fit_threshold
 from src.ml.services.retrain import RetrainService
 
@@ -15,7 +15,7 @@ def test_retrain_service_exposes_target_fpr():
 
 @patch("src.ml.services.classifier_service.retrain_model")
 def test_retrain_service_delegates(mock_retrain):
-    X = np.zeros((10, 17))
+    X = np.zeros((10, FEATURE_DIM))
     y = np.array([0, 1, 0, 1, 0, 1, 0, 1, 0, 1])
     mock_retrain.return_value = {"threshold": 0.42}
     bundle = RetrainService().retrain(X, y)

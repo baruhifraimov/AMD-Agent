@@ -5,7 +5,7 @@ from unittest.mock import MagicMock, patch
 import numpy as np
 
 from src.ml.features import extract_pe_features, extract_string_metrics, features_to_vector
-from src.config import FEATURE_NAMES
+from src.config import FEATURE_DIM, FEATURE_NAMES
 
 
 def test_extract_string_metrics():
@@ -15,8 +15,8 @@ def test_extract_string_metrics():
     assert avg_len >= 4.0
 
 
-def test_feature_names_seventeen_dims():
-    assert len(FEATURE_NAMES) == 17
+def test_feature_names_ember_static_dims():
+    assert len(FEATURE_NAMES) == FEATURE_DIM == 2304
 
 
 def test_features_to_vector_shape():
@@ -49,6 +49,8 @@ def test_extract_pe_features_mock(mock_pe_cls, minimal_pe_path):
     assert "avg_section_entropy" in feats
     assert "string_count" in feats
     assert "avg_string_length" in feats
+    vec = features_to_vector(feats)
+    assert vec.shape == (FEATURE_DIM,)
 
 
 def test_extract_string_metrics():

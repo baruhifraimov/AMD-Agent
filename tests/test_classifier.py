@@ -6,7 +6,13 @@ from unittest.mock import patch
 import numpy as np
 
 from src.config import FEATURE_NAMES
-from src.ml.classifier import cold_start_train, fit_threshold, predict_proba, retrain_model
+from src.ml.classifier import (
+    cold_start_train,
+    fit_threshold,
+    model_bundle_ready,
+    predict_proba,
+    retrain_model,
+)
 
 
 def test_fit_threshold_low_fpr():
@@ -14,6 +20,16 @@ def test_fit_threshold_low_fpr():
     scores = np.array([0.1, 0.2, 0.3, 0.4, 0.6, 0.7, 0.8, 0.9])
     thr = fit_threshold(y, scores, target_fpr=0.25)
     assert 0.0 <= thr <= 1.0
+
+
+def test_old_feature_bundle_not_ready():
+    bundle = {
+        "model": object(),
+        "threshold": 0.5,
+        "training_counts": {"0": 100, "1": 100},
+        "feature_names": [f"old_{i}" for i in range(17)],
+    }
+    assert model_bundle_ready(bundle) is False
 
 
 @patch("src.ml.classifier.lgb.LGBMClassifier")

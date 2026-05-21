@@ -35,6 +35,8 @@ MIN_TRAIN_BENIGN = 100
 PE_FETCH_LIMIT_ENV = "AMD_PE_FETCH_LIMIT"
 PE_FETCH_LIMIT = int(os.getenv(PE_FETCH_LIMIT_ENV, "10"))
 TARGET_FPR = 0.001
+FEATURE_SET_VERSION = "ember_static_v1"
+FEATURE_DIM = 2304
 
 # Benign / malware collection balance
 MIN_BENIGN_FOR_FPR = MIN_TRAIN_BENIGN
@@ -66,6 +68,12 @@ THREATINGESTOR_BRIDGE_BATCH_ENV = "AMD_THREATINGESTOR_BRIDGE_BATCH"
 THREATINGESTOR_SLEEP_BOOTSTRAP_ENV = "AMD_THREATINGESTOR_SLEEP_BOOTSTRAP"
 THREATINGESTOR_SLEEP_STEADY_ENV = "AMD_THREATINGESTOR_SLEEP_STEADY"
 ADWIN_DELTA_ENV = "AMD_ADWIN_DELTA"
+FEATURE_SELECTION_K_ENV = "AMD_FEATURE_SELECTION_K"
+OPTUNA_TRIALS_ENV = "AMD_OPTUNA_TRIALS"
+OPTUNA_TIMEOUT_ENV = "AMD_OPTUNA_TIMEOUT"
+DRIFT_WINDOW_DAYS_ENV = "AMD_DRIFT_WINDOW_DAYS"
+DRIFT_MIN_WINDOW_SAMPLES_ENV = "AMD_DRIFT_MIN_WINDOW_SAMPLES"
+REPLAY_FRACTION_ENV = "AMD_REPLAY_FRACTION"
 MB_CIRCUIT_FAILURE_THRESHOLD_ENV = "AMD_MB_CIRCUIT_FAILURE_THRESHOLD"
 MB_CIRCUIT_OPEN_SECONDS_ENV = "AMD_MB_CIRCUIT_OPEN_SECONDS"
 CTI_HOST_BLOCK_SECONDS_403_ENV = "AMD_CTI_HOST_BLOCK_SECONDS_403"
@@ -123,6 +131,12 @@ THREATINGESTOR_CONFIG_PATH = Path(
 THREATINGESTOR_SLEEP_BOOTSTRAP = int(os.getenv(THREATINGESTOR_SLEEP_BOOTSTRAP_ENV, "60"))
 THREATINGESTOR_SLEEP_STEADY = int(os.getenv(THREATINGESTOR_SLEEP_STEADY_ENV, "900"))
 ADWIN_DELTA = float(os.getenv(ADWIN_DELTA_ENV, "0.002"))
+FEATURE_SELECTION_K = int(os.getenv(FEATURE_SELECTION_K_ENV, "384"))
+OPTUNA_TRIALS = int(os.getenv(OPTUNA_TRIALS_ENV, "25"))
+OPTUNA_TIMEOUT = int(os.getenv(OPTUNA_TIMEOUT_ENV, "300"))
+DRIFT_WINDOW_DAYS = int(os.getenv(DRIFT_WINDOW_DAYS_ENV, "60"))
+DRIFT_MIN_WINDOW_SAMPLES = int(os.getenv(DRIFT_MIN_WINDOW_SAMPLES_ENV, "50"))
+REPLAY_FRACTION = float(os.getenv(REPLAY_FRACTION_ENV, "0.3"))
 MB_CIRCUIT_FAILURE_THRESHOLD = int(os.getenv(MB_CIRCUIT_FAILURE_THRESHOLD_ENV, "3"))
 MB_CIRCUIT_OPEN_SECONDS = float(os.getenv(MB_CIRCUIT_OPEN_SECONDS_ENV, "120"))
 CTI_HOST_BLOCK_SECONDS_403 = float(os.getenv(CTI_HOST_BLOCK_SECONDS_403_ENV, "900"))
@@ -182,7 +196,7 @@ EXEC_API_NAMES = frozenset(
     }
 )
 
-FEATURE_NAMES = [
+_SCALAR_FEATURE_NAMES = [
     "dos_header_size",
     "pe_header_offset",
     "rich_header_present",
@@ -190,17 +204,114 @@ FEATURE_NAMES = [
     "num_sections",
     "avg_section_entropy",
     "max_section_entropy",
+    "min_section_entropy",
+    "std_section_entropy",
     "num_imported_dlls",
     "num_imported_apis",
     "has_exec_apis",
+    "num_exports",
     "image_size",
     "entry_point",
     "subsystem",
     "dll_characteristics",
     "timestamp",
+    "file_size",
+    "overlay_size",
+    "has_overlay",
     "string_count",
     "avg_string_length",
+    "max_string_length",
+    "printable_char_count",
+    "url_count",
+    "path_count",
+    "registry_key_count",
+    "mz_marker_count",
+    "coff_machine",
+    "coff_number_of_sections",
+    "coff_time_date_stamp",
+    "coff_pointer_to_symbol_table",
+    "coff_number_of_symbols",
+    "coff_size_of_optional_header",
+    "coff_characteristics",
+    "optional_magic",
+    "major_linker_version",
+    "minor_linker_version",
+    "size_of_code",
+    "size_of_initialized_data",
+    "size_of_uninitialized_data",
+    "base_of_code",
+    "base_of_data",
+    "image_base",
+    "section_alignment",
+    "file_alignment",
+    "major_os_version",
+    "minor_os_version",
+    "major_image_version",
+    "minor_image_version",
+    "major_subsystem_version",
+    "minor_subsystem_version",
+    "win32_version_value",
+    "size_of_headers",
+    "checksum",
+    "size_of_stack_reserve",
+    "size_of_stack_commit",
+    "size_of_heap_reserve",
+    "size_of_heap_commit",
+    "loader_flags",
+    "number_of_rva_and_sizes",
+    "has_authenticode",
+    "authenticode_size",
+    "parse_warning_count",
+    "section_raw_size_total",
+    "section_virtual_size_total",
+    "section_exec_count",
+    "section_write_count",
+    "section_read_count",
+    "section_zero_raw_count",
+    "section_zero_virtual_count",
+    "section_suspicious_name_count",
+    "section_name_entropy",
+    "capstone_available",
+    "disassembled_instruction_count",
+    "branch_instruction_count",
+    "call_instruction_count",
+    "ret_instruction_count",
+    "indirect_branch_count",
+    "memory_operand_instruction_count",
+    "immediate_operand_instruction_count",
 ]
+_SCALAR_FEATURE_NAMES += [f"data_directory_{i:02d}_rva" for i in range(16)]
+_SCALAR_FEATURE_NAMES += [f"data_directory_{i:02d}_size" for i in range(16)]
+_SCALAR_FEATURE_NAMES += [
+    f"scalar_reserved_{i:03d}"
+    for i in range(128 - len(_SCALAR_FEATURE_NAMES))
+]
+
+BYTE_HIST_FEATURE_NAMES = [f"byte_hist_{i:03d}" for i in range(256)]
+BYTE_ENTROPY_FEATURE_NAMES = [
+    f"byte_entropy_{entropy_bin:02d}_{byte_bin:02d}"
+    for entropy_bin in range(16)
+    for byte_bin in range(16)
+]
+PRINTABLE_FEATURE_NAMES = [f"printable_{i:03d}" for i in range(96)]
+IMPORT_HASH_FEATURE_NAMES = [f"import_hash_{i:04d}" for i in range(1024)]
+EXPORT_HASH_FEATURE_NAMES = [f"export_hash_{i:03d}" for i in range(256)]
+SECTION_HASH_FEATURE_NAMES = [f"section_hash_{i:03d}" for i in range(128)]
+OPCODE_FEATURE_NAMES = [f"opcode_feature_{i:03d}" for i in range(160)]
+
+FEATURE_NAMES = (
+    _SCALAR_FEATURE_NAMES
+    + BYTE_HIST_FEATURE_NAMES
+    + BYTE_ENTROPY_FEATURE_NAMES
+    + PRINTABLE_FEATURE_NAMES
+    + IMPORT_HASH_FEATURE_NAMES
+    + EXPORT_HASH_FEATURE_NAMES
+    + SECTION_HASH_FEATURE_NAMES
+    + OPCODE_FEATURE_NAMES
+)
+
+if len(FEATURE_NAMES) != FEATURE_DIM:
+    raise RuntimeError(f"FEATURE_NAMES length {len(FEATURE_NAMES)} != FEATURE_DIM {FEATURE_DIM}")
 
 
 def ensure_dirs() -> None:
