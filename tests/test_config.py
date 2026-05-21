@@ -23,3 +23,13 @@ def test_malware_fallback_providers_env(monkeypatch):
     finally:
         monkeypatch.delenv("AMD_MALWARE_FALLBACK_PROVIDERS", raising=False)
         importlib.reload(config)
+
+
+def test_fallback_pe_check_mult_env(monkeypatch):
+    monkeypatch.setenv("AMD_FALLBACK_PE_CHECK_MULT", "2")
+    reloaded = importlib.reload(config)
+    try:
+        assert reloaded.FALLBACK_PE_CHECK_MULT == 2
+    finally:
+        monkeypatch.delenv("AMD_FALLBACK_PE_CHECK_MULT", raising=False)
+        importlib.reload(config)

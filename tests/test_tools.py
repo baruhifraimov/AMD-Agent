@@ -81,11 +81,32 @@ def test_get_recent_pe_queries_file_types_before_recent(httpx_mock, tmp_paths):
                 ],
             },
         )
-    samples = get_recent_pe(limit=3)
-    assert len(samples) == 3
+    samples = get_recent_pe(limit=4)
+    assert len(samples) == 4
     bodies = [request.content.decode() for request in httpx_mock.get_requests()]
     assert all(f"file_type={file_type}" in "&".join(bodies) for file_type in ("exe", "dll", "sys", "scr"))
     assert all("query=get_file_type" in body for body in bodies)
+
+
+def test_get_recent_pe_continues_after_file_type_502(httpx_mock, tmp_paths):
+    httpx_mock.add_response(
+        method="POST",
+        url="https://mb-api.abuse.ch/api/v1/",
+        status_code=502,
+    )
+    httpx_mock.add_response(
+        method="POST",
+        url="https://mb-api.abuse.ch/api/v1/",
+        json={
+            "query_status": "ok",
+            "data": [
+                {"sha256_hash": "b" * 64, "file_type": "dll"},
+            ],
+        },
+    )
+    samples = get_recent_pe(limit=1)
+    assert len(samples) == 1
+    assert samples[0]["sha256_hash"] == "b" * 64
 
 
 def test_get_recent_pe_falls_back_to_recent_when_file_types_are_dry(httpx_mock, tmp_paths):

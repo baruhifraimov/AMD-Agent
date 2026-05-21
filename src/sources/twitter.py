@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 
+from src.config import FALLBACK_PE_CHECK_MULT
 from src.sources.base import PESourceProvider, SampleCandidate
 from src.tools import malwarebazaar as mb
 from src.tools import threatfox as tf
@@ -17,10 +18,13 @@ class TwitterProvider(PESourceProvider):
 
     def discover(self, limit: int) -> list[SampleCandidate]:
         candidates: list[SampleCandidate] = []
-        for item in tf.get_social_sha256_hashes(days=7, limit=limit * 3):
+        max_checks = max(limit, 1) * FALLBACK_PE_CHECK_MULT
+        checked = 0
+        for item in tf.get_social_sha256_hashes(days=7, limit=max_checks):
             sha = (item.get("sha256") or "").lower()
             if not sha:
                 continue
+            checked += 1
             if not mb.malwarebazaar_available():
                 logger.warning("MB circuit open; aborting Twitter CTI PE checks")
                 break
@@ -50,7 +54,7 @@ class TwitterProvider(PESourceProvider):
             )
             if len(candidates) >= limit:
                 break
-        logger.info("Twitter CTI discover found %d candidate(s)", len(candidates))
+        logger.info("Twitter CTI discover found %d candidate(s) after %d PE check(s)", len(candidates), checked)
         return candidates
 
     def download(self, candidate: SampleCandidate) -> bytes:
