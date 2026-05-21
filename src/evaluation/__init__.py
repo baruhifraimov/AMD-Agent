@@ -6,6 +6,7 @@ __all__ = [
     "compute_metrics",
     "run_tesseract_eval",
     "append_eval_log",
+    "latest_eval_metrics",
     "append_drift_log",
     "build_drift_record",
     "plot_performance_decay",
@@ -18,6 +19,7 @@ def __getattr__(name: str):
         "compute_metrics",
         "run_tesseract_eval",
         "append_eval_log",
+        "latest_eval_metrics",
         "plot_performance_decay",
         "compute_aut",
     ):

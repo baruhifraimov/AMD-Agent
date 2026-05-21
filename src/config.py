@@ -19,6 +19,7 @@ if _in_container:
     MODEL_PATH = Path("/data/models/model.pkl")
     ADWIN_PATH = Path("/data/models/adwin.joblib")
     EVAL_LOG_PATH = Path("/data/evaluation_log.jsonl")
+    EVAL_STATE_PATH = Path("/data/evaluation_state.json")
     DRIFT_LOG_PATH = Path("/data/drift_log.jsonl")
     FIGURES_DIR = Path("/data/figures")
 else:
@@ -28,6 +29,7 @@ else:
     MODEL_PATH = PROJECT_ROOT / "data" / "models" / "model.pkl"
     ADWIN_PATH = PROJECT_ROOT / "data" / "models" / "adwin.joblib"
     EVAL_LOG_PATH = PROJECT_ROOT / "data" / "evaluation_log.jsonl"
+    EVAL_STATE_PATH = PROJECT_ROOT / "data" / "evaluation_state.json"
     DRIFT_LOG_PATH = PROJECT_ROOT / "data" / "drift_log.jsonl"
     FIGURES_DIR = PROJECT_ROOT / "report" / "figures"
 
@@ -77,6 +79,8 @@ OPTUNA_TIMEOUT_ENV = "AMD_OPTUNA_TIMEOUT"
 DRIFT_WINDOW_DAYS_ENV = "AMD_DRIFT_WINDOW_DAYS"
 DRIFT_MIN_WINDOW_SAMPLES_ENV = "AMD_DRIFT_MIN_WINDOW_SAMPLES"
 REPLAY_FRACTION_ENV = "AMD_REPLAY_FRACTION"
+EVAL_EVERY_RUNS_ENV = "AMD_EVAL_EVERY_RUNS"
+EVAL_SKIP_BOOTSTRAP_ENV = "AMD_EVAL_SKIP_BOOTSTRAP"
 MB_CIRCUIT_FAILURE_THRESHOLD_ENV = "AMD_MB_CIRCUIT_FAILURE_THRESHOLD"
 MB_CIRCUIT_OPEN_SECONDS_ENV = "AMD_MB_CIRCUIT_OPEN_SECONDS"
 CTI_HOST_BLOCK_SECONDS_403_ENV = "AMD_CTI_HOST_BLOCK_SECONDS_403"
@@ -98,6 +102,10 @@ def ollama_source_selection_enabled() -> bool:
 
 def threatingestor_enabled() -> bool:
     return os.getenv(THREATINGESTOR_ENABLED_ENV, "1").strip() not in ("0", "false", "no")
+
+
+def eval_skip_bootstrap() -> bool:
+    return os.getenv(EVAL_SKIP_BOOTSTRAP_ENV, "1").strip() not in ("0", "false", "no")
 
 
 THREAT_QUEUE_ENABLED = threat_queue_enabled()
@@ -140,6 +148,8 @@ OPTUNA_TIMEOUT = int(os.getenv(OPTUNA_TIMEOUT_ENV, "300"))
 DRIFT_WINDOW_DAYS = int(os.getenv(DRIFT_WINDOW_DAYS_ENV, "60"))
 DRIFT_MIN_WINDOW_SAMPLES = int(os.getenv(DRIFT_MIN_WINDOW_SAMPLES_ENV, "50"))
 REPLAY_FRACTION = float(os.getenv(REPLAY_FRACTION_ENV, "0.3"))
+EVAL_EVERY_RUNS = max(1, int(os.getenv(EVAL_EVERY_RUNS_ENV, "10")))
+EVAL_SKIP_BOOTSTRAP = eval_skip_bootstrap()
 MB_CIRCUIT_FAILURE_THRESHOLD = int(os.getenv(MB_CIRCUIT_FAILURE_THRESHOLD_ENV, "3"))
 MB_CIRCUIT_OPEN_SECONDS = float(os.getenv(MB_CIRCUIT_OPEN_SECONDS_ENV, "120"))
 CTI_HOST_BLOCK_SECONDS_403 = float(os.getenv(CTI_HOST_BLOCK_SECONDS_403_ENV, "900"))
@@ -325,6 +335,7 @@ def ensure_dirs() -> None:
         MODEL_PATH.parent,
         BENIGN_DIR,
         FIGURES_DIR,
+        EVAL_STATE_PATH.parent,
         DRIFT_LOG_PATH.parent,
         THREATINGESTOR_ARTIFACT_DB.parent,
     ):

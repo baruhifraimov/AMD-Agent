@@ -72,6 +72,8 @@ def madar_retrain(
     new_batch: list[dict],
     historical_labels: list[int],
     new_labels: list[int],
+    *,
+    force_feature_reselection: bool = False,
 ) -> dict[str, Any] | None:
     """Build replay buffer + new batch, retrain LightGBM."""
     X_hist = vectorize_batch(historical_features) if historical_features else np.empty((0, 0))
@@ -105,10 +107,16 @@ def madar_retrain(
 
     frozen: list[int] | None = None
     existing = load_bundle()
-    if existing and _bundle_feature_compatible(existing):
+    if not force_feature_reselection and existing and _bundle_feature_compatible(existing):
         raw = existing.get("selected_feature_indices")
         if isinstance(raw, list) and raw:
             frozen = [int(i) for i in raw]
 
-    logger.info("MADAR retrain: replay=%d new=%d total=%d", len(replay_idx), len(new_batch), len(y))
+    logger.info(
+        "MADAR retrain: replay=%d new=%d total=%d feature_reselection=%s",
+        len(replay_idx),
+        len(new_batch),
+        len(y),
+        force_feature_reselection,
+    )
     return retrain_model(X, y, frozen_feature_indices=frozen)

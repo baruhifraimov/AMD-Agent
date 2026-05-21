@@ -337,11 +337,20 @@ def _split_metadata(
     y_train: np.ndarray,
     y_val: np.ndarray,
     y_test: np.ndarray | None = None,
+    threshold_target_fpr: float = TARGET_FPR,
 ) -> dict[str, Any]:
+    val_benign = int(np.sum(y_val == 0)) if len(y_val) else 0
+    min_observable_fpr = 1.0 / val_benign if val_benign else 1.0
     meta: dict[str, Any] = {
         "split_mode": split_mode,
         "train_class_counts": class_counts_from_labels(y_train),
         "val_class_counts": class_counts_from_labels(y_val) if len(y_val) else {},
+        "threshold_target_fpr": float(threshold_target_fpr),
+        "threshold_validation_benign": val_benign,
+        "threshold_min_observable_fpr": float(min_observable_fpr),
+        "threshold_target_supported": bool(
+            val_benign > 0 and min_observable_fpr <= threshold_target_fpr
+        ),
     }
     if y_test is not None and len(y_test):
         meta["test_class_counts"] = class_counts_from_labels(y_test)
@@ -397,6 +406,19 @@ def fit_model_artifact(
     )
     val_scores = predict_proba(model, X_val_sel, feature_names=selected_names) if len(y_val) else np.array([])
     threshold = fit_threshold(y_val, val_scores) if len(y_val) else 0.5
+    threshold_meta = _split_metadata(
+        split_mode=split_mode,
+        y_train=y_train,
+        y_val=y_val,
+    )
+    if not threshold_meta["threshold_target_supported"] and len(y_val):
+        logger.info(
+            "Threshold target FPR %.4f is below validation resolution %.4f "
+            "(benign=%d); treating threshold as small-sample calibration",
+            TARGET_FPR,
+            threshold_meta["threshold_min_observable_fpr"],
+            threshold_meta["threshold_validation_benign"],
+        )
     bundle: dict[str, Any] = {
         "model": model,
         "threshold": threshold,
@@ -406,11 +428,7 @@ def fit_model_artifact(
         "selected_feature_indices": selected,
         "selected_feature_names": selected_names,
         "optuna_best_params": params,
-        "split_metadata": _split_metadata(
-            split_mode=split_mode,
-            y_train=y_train,
-            y_val=y_val,
-        ),
+        "split_metadata": threshold_meta,
     }
     if training_counts is not None:
         bundle["training_counts"] = {
@@ -543,16 +561,15 @@ def cold_start_train(tracker: db.MalwareTracker) -> dict[str, Any] | None:
         )
         return None
 
-    X_train, y_train, X_val, y_val, X_test, y_test = temporal_split(
+    X_train, y_train, X_val, y_val, X_test, y_test = stratified_split(
         X,
         y,
-        train_ratio=0.7,
-        val_ratio=0.15,
-        test_ratio=0.15,
+        val_fraction=0.15,
+        test_fraction=0.15,
     )
     if len(np.unique(y_train)) < 2:
         logger.warning(
-            "Cold-start skipped: temporal train split has fewer than 2 classes "
+            "Cold-start skipped: stratified train split has fewer than 2 classes "
             "(n_train=%d, classes=%s)",
             len(y_train),
             np.unique(y_train).tolist(),
@@ -567,7 +584,7 @@ def cold_start_train(tracker: db.MalwareTracker) -> dict[str, Any] | None:
             y_val,
             training_counts=counts,
             optimize=True,
-            split_mode="temporal",
+            split_mode="stratified",
         )
     except ValueError as exc:
         logger.warning("Cold-start skipped: %s", exc)

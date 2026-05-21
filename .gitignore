@@ -8,6 +8,7 @@ data/malware_tracker.db
 data/models/*.pkl
 data/models/*.joblib
 data/evaluation_log.jsonl
+data/evaluation_state.json
 data/drift_log.jsonl
 .DS_Store
 ._*

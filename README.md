@@ -33,7 +33,7 @@ START
 - `ClassifierInference`: scores samples with an XGBoost-ranked, Optuna-tuned LightGBM pipeline and FPR-aware thresholding.
 - `ExplainDriftContext`: runs `capa -j -r <rules_dir>` and asks Ollama to produce a semantic drift report.
 - `ModelRetrain`: retrains with MADAR replay buffer. Single-class retrain batches are skipped safely.
-- `Evaluation` (LangGraph node): runs TESSERACT chronological eval every pass, appends `evaluation_log.jsonl`, plots decay; on drift cycles also writes `drift_log.jsonl` with pre/post metrics.
+- `Evaluation` (LangGraph node): runs TESSERACT chronological eval on a configurable cadence, appends `evaluation_log.jsonl`, plots decay; on retrain/drift cycles it always runs and writes `drift_log.jsonl` with pre/post metrics.
 
 The initial LightGBM model is not considered ready until SQLite contains at
 least 100 active malware samples and 100 active benign samples with extracted
@@ -204,6 +204,8 @@ Other useful variables:
 | `AMD_FEATURE_SELECTION_K` | number of XGBoost-ranked features retained for LightGBM (default `384`) |
 | `AMD_OPTUNA_TRIALS` | LightGBM tuning trials (default `25`; set `0` to disable) |
 | `AMD_OPTUNA_TIMEOUT` | Optuna tuning timeout in seconds (default `300`) |
+| `AMD_EVAL_EVERY_RUNS` | run periodic TESSERACT eval every N steady-state graph passes (default `10`) |
+| `AMD_EVAL_SKIP_BOOTSTRAP` | skip periodic TESSERACT eval during bootstrap (default `1`) |
 | `AMD_MB_CIRCUIT_FAILURE_THRESHOLD` | consecutive MB 5xx/transport failures before circuit opens (default `3`) |
 | `AMD_MB_CIRCUIT_OPEN_SECONDS` | seconds to skip MB API calls while circuit is open (default `120`) |
 | `AMD_CTI_HOST_BLOCK_SECONDS_403` | block CTI host after HTTP 403 (default `900`) |
@@ -344,7 +346,7 @@ Pending row contract:
 
 ## Evaluation
 
-The `evaluation` LangGraph node (`src/nodes/evaluation_node.py`) runs at the end of every graph pass (inference and retrain branches). TESSERACT logic lives in `src/evaluation/tesseract.py`.
+The `evaluation` LangGraph node (`src/nodes/evaluation_node.py`) sits at the end of every graph pass, but TESSERACT only runs every `AMD_EVAL_EVERY_RUNS` steady-state passes. It is skipped during bootstrap by default and forced after every retrain attempt, including skipped retrains. TESSERACT logic lives in `src/evaluation/tesseract.py`.
 
 It uses:
 
@@ -355,10 +357,10 @@ It uses:
 - performance plot at `FIGURES_DIR/performance_decay.png`.
 
 If the temporal validation or test split contains only one class, TESSERACT is
-skipped instead of emitting misleading precision/recall. The cold-start trainer
-also logs a separate bootstrap sanity evaluation on a stratified holdout; that
-metric confirms the initial model learned a basic malware/benign separator but
-does not replace temporal TESSERACT reporting.
+skipped instead of emitting misleading precision/recall. Cold-start training
+uses a stratified split so the initial 100/100 bootstrap model is stable even
+when provider batches arrive in an uneven chronological order; temporal
+TESSERACT remains the research/evaluation view.
 
 Local default figure path:
 
@@ -379,6 +381,7 @@ Report artifacts (Docker paths; local dev uses `data/`):
 | File | Purpose |
 |------|---------|
 | `/data/evaluation_log.jsonl` | Per-run TESSERACT metrics (accuracy, FPR, AUT) |
+| `/data/evaluation_state.json` | Persistent counter for periodic evaluation cadence |
 | `/data/drift_log.jsonl` | Concept drift events with pre/post metrics and capa excerpt |
 | `/data/figures/performance_decay.png` | Accuracy/FPR over evaluation runs |
 

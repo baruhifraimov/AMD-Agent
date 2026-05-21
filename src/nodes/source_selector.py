@@ -76,6 +76,7 @@ def source_selector(state: AgentState) -> dict:
         "feature_vectors": [],
         "feature_errors": {},
         "predictions": {},
+        "evaluation_metrics": {},
         "section_entropies": [],
         "new_labeled_batch": [],
         "drift_detected": False,

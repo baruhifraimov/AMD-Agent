@@ -71,7 +71,7 @@ def test_drift_node_skips_during_bootstrap(mock_service, mock_ctx, tmp_paths):
     mock_service.assert_not_called()
 
 
-@patch("src.evaluation.tesseract.run_tesseract_eval", return_value={"accuracy": 0.9})
+@patch("src.evaluation.tesseract.latest_eval_metrics", return_value={"accuracy": 0.9})
 @patch("src.nodes.drift_monitor.DriftMonitorService")
 def test_drift_node_sets_pending_log_on_drift(mock_service, mock_eval, tmp_paths):
     mock_svc = mock_service.return_value

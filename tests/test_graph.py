@@ -59,6 +59,7 @@ def test_route_after_intel_ingest():
     assert route_after_intel_ingest(AgentState(sample_candidates=[{"x": 1}])) == "binary_fetch"
 
 
+@patch("src.nodes.evaluation_node.EVAL_EVERY_RUNS", 1)
 @patch("src.evaluation.tesseract.run_tesseract_eval", return_value={})
 @patch("src.evaluation.tesseract.plot_performance_decay")
 @patch("src.nodes.threat_intel_ingest.build_collection_context")

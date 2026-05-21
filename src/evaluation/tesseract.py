@@ -97,6 +97,23 @@ def run_tesseract_eval(
     metrics = compute_metrics(y_test, y_pred)
     metrics["threshold"] = threshold
     metrics["target_fpr"] = cfg.TARGET_FPR
+    metrics["split_mode_temporal"] = 1.0
+    metrics["train_support"] = float(len(y_train))
+    metrics["val_support"] = float(len(y_val))
+    metrics["test_support"] = float(len(y_test))
+    metrics["support"] = float(len(y_test))
+    metrics["train_benign"] = float(np.sum(y_train == 0))
+    metrics["train_malware"] = float(np.sum(y_train == 1))
+    metrics["val_benign"] = float(np.sum(y_val == 0))
+    metrics["val_malware"] = float(np.sum(y_val == 1))
+    metrics["test_benign"] = float(np.sum(y_test == 0))
+    metrics["test_malware"] = float(np.sum(y_test == 1))
+    val_benign = int(np.sum(y_val == 0))
+    min_observable_fpr = 1.0 / val_benign if val_benign else 1.0
+    metrics["threshold_min_observable_fpr"] = float(min_observable_fpr)
+    metrics["threshold_target_supported"] = (
+        1.0 if val_benign > 0 and min_observable_fpr <= cfg.TARGET_FPR else 0.0
+    )
     metrics["aut"] = compute_aut(_historical_metric_values("accuracy") + [metrics["accuracy"]])
     return metrics
 
@@ -107,6 +124,28 @@ def append_eval_log(metrics: dict[str, float], path: Path | None = None) -> None
     record = {"metrics": metrics}
     with p.open("a") as f:
         f.write(json.dumps(record) + "\n")
+
+
+def latest_eval_metrics(path: Path | None = None) -> dict[str, float]:
+    """Return the last persisted TESSERACT metrics record, if any."""
+    p = path or cfg.EVAL_LOG_PATH
+    if not p.exists():
+        return {}
+    latest: dict[str, float] = {}
+    with p.open() as f:
+        for line in f:
+            try:
+                rec = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            metrics = rec.get("metrics", {})
+            if isinstance(metrics, dict):
+                latest = {
+                    str(key): float(value)
+                    for key, value in metrics.items()
+                    if isinstance(value, (int, float))
+                }
+    return latest
 
 
 def plot_performance_decay(log_path: Path | None = None, out_path: Path | None = None) -> Path:

@@ -44,10 +44,9 @@ def drift_monitor(state: AgentState) -> dict:
             len(labeled_batch),
             drift_stats,
         )
-        from src.evaluation.tesseract import run_tesseract_eval
+        from src.evaluation.tesseract import latest_eval_metrics
 
-        pre_metrics = run_tesseract_eval()
-        out["drift_pre_metrics"] = pre_metrics
+        out["drift_pre_metrics"] = latest_eval_metrics()
         out["pending_drift_log"] = True
 
     return out

@@ -19,6 +19,13 @@ def _valid_label(label: object) -> int | None:
     return None
 
 
+def _force_feature_reselection(drift_stats: dict[str, float]) -> bool:
+    """Re-rank features on stronger drift, otherwise reuse the previous selected set."""
+    mean_shift = float(drift_stats.get("mean_shift", 0.0) or 0.0)
+    corr_shift = float(drift_stats.get("corr_shift", 0.0) or 0.0)
+    return mean_shift >= 3.0 or corr_shift >= 0.7
+
+
 def model_retrain(state: AgentState) -> dict:
     tracker = db.get_tracker()
     if allow_local_benign():
@@ -59,11 +66,13 @@ def model_retrain(state: AgentState) -> dict:
         return _retrain_skipped(state, historical_features, new_features)
 
     try:
+        feature_reselection = _force_feature_reselection(state.drift_stats)
         bundle = madar_retrain(
             historical_features,
             new_features,
             historical_labels,
             new_labels,
+            force_feature_reselection=feature_reselection,
         )
     except ValueError as exc:
         logger.warning("MADAR retrain skipped: %s", exc)
@@ -83,6 +92,7 @@ def model_retrain(state: AgentState) -> dict:
             "retrained": 1.0,
             "replay_size": float(len(historical_features)),
             "new_batch_size": float(len(new_features)),
+            "feature_reselection": 1.0 if feature_reselection else 0.0,
         },
     }
 
