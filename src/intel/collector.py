@@ -236,9 +236,13 @@ class ThreatIntelCollector:
                 stats["existing"] += 1
                 stats["existing_hashes"].append(sha)
                 continue
-            if not self._is_pe_hash_cached(sha):
-                stats["rejected"] += 1
-                continue
+            try:
+                if not self._is_pe_hash_cached(sha):
+                    stats["rejected"] += 1
+                    continue
+            except mb.MalwareBazaarUnavailable:
+                logger.warning("MB circuit open; aborting validate_and_queue PE checks")
+                break
 
             insert_pending_hash(self.tracker, sha, label=1)
             stats["queued"] += 1
@@ -360,10 +364,18 @@ class ThreatIntelCollector:
             sha = str(item.get("sha256", "")).lower()
             if len(sha) != 64 or sha in seen:
                 continue
-            if self.tracker.is_downloaded(sha) or self.tracker.is_corrupted(sha):
+            if (
+                self.tracker.is_downloaded(sha)
+                or self.tracker.is_corrupted(sha)
+                or self.tracker.is_pending(sha)
+            ):
                 continue
-            if not self._is_pe_hash_cached(sha):
-                continue
+            try:
+                if not self._is_pe_hash_cached(sha):
+                    continue
+            except mb.MalwareBazaarUnavailable:
+                logger.warning("MB circuit open; aborting web_discover PE checks")
+                break
             seen.add(sha)
             candidates.append(
                 SampleCandidate(
@@ -421,8 +433,12 @@ class ThreatIntelCollector:
     def _is_pe_hash_cached(self, sha: str) -> bool:
         if sha in self._pe_hash_cache:
             return self._pe_hash_cache[sha]
+        if not mb.malwarebazaar_available():
+            raise mb.MalwareBazaarUnavailable("MalwareBazaar circuit is open")
         try:
             ok = mb.is_pe_hash(sha)
+        except mb.MalwareBazaarUnavailable:
+            raise
         except Exception as exc:
             logger.info("MB is_pe_hash failed for %s: %s", sha, exc)
             ok = False

@@ -13,6 +13,7 @@ from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, START, StateGraph
 
 import src.db.tracker as db
+from src.collection.context import build_collection_context
 from src.config import MIN_TRAIN_BENIGN, MIN_TRAIN_MALWARE, ensure_dirs
 from src.ml.classifier import load_bundle, model_bundle_ready, training_targets_met
 from src.nodes import (
@@ -54,7 +55,7 @@ def route_after_selector(
 ) -> Literal["source_discovery", "threat_intel_ingest"]:
     if state.expected_label == 0:
         return "source_discovery"
-    if state.collection_phase == "bootstrap":
+    if build_collection_context().phase == "bootstrap":
         return "source_discovery"
     if state.route_hint == "threat_intel_ingest":
         return "threat_intel_ingest"

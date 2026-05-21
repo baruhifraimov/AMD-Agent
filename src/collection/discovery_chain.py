@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 
 import src.db.tracker as db
-from src.collection.context import CollectionContext
+from src.collection.context import CollectionContext, build_collection_context
 from src.config import PE_FETCH_LIMIT
 from src.sources.base import SampleCandidate
 from src.sources.registry import SourceRegistry, get_registry
@@ -15,7 +15,11 @@ logger = logging.getLogger(__name__)
 
 def _known_bad_or_downloaded(candidate: SampleCandidate, tracker: db.MalwareTracker) -> bool:
     sha = str(candidate.download_ref.get("sha256") or candidate.external_id).lower()
-    return len(sha) == 64 and (tracker.is_downloaded(sha) or tracker.is_corrupted(sha))
+    return len(sha) == 64 and (
+        tracker.is_downloaded(sha)
+        or tracker.is_corrupted(sha)
+        or tracker.is_pending(sha)
+    )
 
 
 def discover_with_fallback(
@@ -31,6 +35,8 @@ def discover_with_fallback(
     """Discover from primary providers; bootstrap malware may fall back to dynamic_cti."""
     registry = registry or get_registry()
     tracker = tracker or db.get_tracker()
+    if ctx is None:
+        ctx = build_collection_context(tracker)
     fetch_limit = limit or PE_FETCH_LIMIT
     candidates: list[SampleCandidate] = []
 
@@ -63,10 +69,9 @@ def discover_with_fallback(
                 discovered = []
             fresh = [c for c in discovered if not _known_bad_or_downloaded(c, tracker)]
             candidates.extend(fresh)
-            phase = ctx.phase if ctx is not None else "unknown"
             logger.info(
-                "MalwareBazaar catalog dry (phase=%s); ThreatFox fallback yielded %d fresh",
-                phase,
+                "Primary dry (phase=%s); ThreatFox fallback yielded %d fresh",
+                ctx.phase,
                 len(fresh),
             )
 
@@ -79,14 +84,13 @@ def discover_with_fallback(
             discovered = []
         fresh = [c for c in discovered if not _known_bad_or_downloaded(c, tracker)]
         candidates.extend(fresh)
-        phase = ctx.phase if ctx is not None else "unknown"
         logger.info(
             "Twitter CTI fallback (phase=%s) yielded %d fresh candidates",
-            phase,
+            ctx.phase,
             len(fresh),
         )
 
-    if not candidates and ctx is not None and expected_label == 1:
+    if not candidates and expected_label == 1:
         logger.info(
             "Primary discovery returned 0 fresh (phase=%s); falling back to dynamic_cti/DDG",
             ctx.phase,

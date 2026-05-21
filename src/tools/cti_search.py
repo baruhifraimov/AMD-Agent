@@ -5,20 +5,65 @@ from __future__ import annotations
 import ipaddress
 import logging
 import re
+import time
 from urllib.parse import urlparse
 
 import httpx
 from bs4 import BeautifulSoup
 
-from src.config import CTI_PAGE_MAX_BYTES, CTI_REQUEST_TIMEOUT, CTI_SEARCH_LIMIT
+from src.config import (
+    CTI_HOST_BLOCK_SECONDS_403,
+    CTI_HOST_BLOCK_SECONDS_429,
+    CTI_HOST_BLOCK_SECONDS_TRANSPORT,
+    CTI_PAGE_MAX_BYTES,
+    CTI_REQUEST_TIMEOUT,
+    CTI_SEARCH_LIMIT,
+)
 
 logger = logging.getLogger(__name__)
+
+_host_blocklist: dict[str, float] = {}
 
 SHA256_RE = re.compile(r"\b[a-fA-F0-9]{64}\b")
 PE_URL_RE = re.compile(
     r"https?://[^\s\"'<>]+\.(?:exe|dll|sys|scr|zip)(?:\?[^\s\"'<>]*)?",
     re.IGNORECASE,
 )
+
+
+def reset_host_blocklist() -> None:
+    """Clear host blocklist (tests only)."""
+    _host_blocklist.clear()
+
+
+def _host_key(url: str) -> str:
+    return (urlparse(url).hostname or "").lower()
+
+
+def _host_blocked(url: str) -> bool:
+    host = _host_key(url)
+    if not host:
+        return False
+    until = _host_blocklist.get(host, 0.0)
+    if time.monotonic() < until:
+        return True
+    if host in _host_blocklist:
+        del _host_blocklist[host]
+    return False
+
+
+def _record_host_failure(url: str, status_code: int | None) -> None:
+    host = _host_key(url)
+    if not host:
+        return
+    if status_code == 403:
+        ttl = CTI_HOST_BLOCK_SECONDS_403
+    elif status_code == 429:
+        ttl = CTI_HOST_BLOCK_SECONDS_429
+    else:
+        ttl = CTI_HOST_BLOCK_SECONDS_TRANSPORT
+    _host_blocklist[host] = time.monotonic() + ttl
+    logger.info("CTI host blocklisted %s for %.0fs (status=%s)", host, ttl, status_code)
 
 
 def _ddgs_client():
@@ -65,9 +110,12 @@ def fetch_public_text(url: str) -> str:
     """Fetch a public web page and return text, bounded by size and timeout."""
     if not is_public_url(url):
         return ""
+    if _host_blocked(url):
+        logger.debug("CTI fetch skipped (host blocklisted): %s", _host_key(url))
+        return ""
+    content = bytearray()
     try:
         with httpx.Client(timeout=CTI_REQUEST_TIMEOUT, follow_redirects=True) as client:
-            content = bytearray()
             with client.stream("GET", url) as response:
                 response.raise_for_status()
                 for chunk in response.iter_bytes():
@@ -77,6 +125,16 @@ def fetch_public_text(url: str) -> str:
                     content.extend(chunk[:remaining])
                     if len(chunk) > remaining:
                         break
+    except httpx.HTTPStatusError as exc:
+        status = exc.response.status_code
+        if status in (403, 429):
+            _record_host_failure(url, status)
+        logger.warning("CTI page fetch failed for %s: %s", url, exc)
+        return ""
+    except httpx.TransportError as exc:
+        _record_host_failure(url, None)
+        logger.warning("CTI page fetch failed for %s: %s", url, exc)
+        return ""
     except Exception as exc:
         logger.warning("CTI page fetch failed for %s: %s", url, exc)
         return ""

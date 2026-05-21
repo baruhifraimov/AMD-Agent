@@ -21,9 +21,15 @@ class TwitterProvider(PESourceProvider):
             sha = (item.get("sha256") or "").lower()
             if not sha:
                 continue
+            if not mb.malwarebazaar_available():
+                logger.warning("MB circuit open; aborting Twitter CTI PE checks")
+                break
             try:
                 if not mb.is_pe_hash(sha):
                     continue
+            except mb.MalwareBazaarUnavailable:
+                logger.warning("MB circuit open; aborting Twitter CTI PE checks")
+                break
             except Exception as exc:
                 logger.debug("Twitter CTI skip %s (MB is_pe_hash): %s", sha, exc)
                 continue

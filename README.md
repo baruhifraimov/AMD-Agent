@@ -186,6 +186,11 @@ Other useful variables:
 | `AMD_BOOTSTRAP_MAX_RUNS` | max bootstrap graph passes before giving up (default `60`) |
 | `AMD_BOOTSTRAP_INTERVAL` | seconds between bootstrap passes (default `10`) |
 | `AMD_ADWIN_DELTA` | River ADWIN confidence bound (default `0.002`; higher = less sensitive) |
+| `AMD_MB_CIRCUIT_FAILURE_THRESHOLD` | consecutive MB 5xx/transport failures before circuit opens (default `3`) |
+| `AMD_MB_CIRCUIT_OPEN_SECONDS` | seconds to skip MB API calls while circuit is open (default `120`) |
+| `AMD_CTI_HOST_BLOCK_SECONDS_403` | block CTI host after HTTP 403 (default `900`) |
+| `AMD_CTI_HOST_BLOCK_SECONDS_429` | block CTI host after HTTP 429 (default `3600`) |
+| `AMD_CTI_HOST_BLOCK_SECONDS_TRANSPORT` | block CTI host after connection errors (default `300`) |
 
 ## Docker Run
 

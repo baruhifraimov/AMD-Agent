@@ -17,7 +17,18 @@ def test_route_after_drift():
     assert route_after_drift(AgentState(drift_detected=True)) == "retrain"
 
 
-def test_route_after_selector():
+@patch("src.graph.build_collection_context")
+def test_route_after_selector(mock_ctx):
+    from src.collection.context import CollectionContext
+
+    steady = CollectionContext(
+        benign_count=100, malware_count=100, model_ready=True, pending_depth=0
+    )
+    bootstrap = CollectionContext(
+        benign_count=50, malware_count=50, model_ready=False, pending_depth=0
+    )
+
+    mock_ctx.return_value = steady
     assert route_after_selector(AgentState(expected_label=0)) == "source_discovery"
     assert route_after_selector(
         AgentState(expected_label=1, collection_phase="bootstrap")
@@ -33,12 +44,23 @@ def test_route_after_selector():
         AgentState(expected_label=1, collection_phase="steady", route_hint="source_discovery")
     ) == "source_discovery"
 
+    mock_ctx.return_value = bootstrap
+    assert route_after_selector(
+        AgentState(
+            expected_label=1,
+            collection_phase="steady",
+            route_hint="threat_intel_ingest",
+        )
+    ) == "source_discovery"
+
 
 def test_route_after_intel_ingest():
     assert route_after_intel_ingest(AgentState(sample_candidates=[])) == "source_discovery"
     assert route_after_intel_ingest(AgentState(sample_candidates=[{"x": 1}])) == "binary_fetch"
 
 
+@patch("src.nodes.threat_intel_ingest.build_collection_context")
+@patch("src.graph.build_collection_context")
 @patch("src.nodes.binary_fetch.download_pe_candidate")
 @patch("src.nodes.threat_intel_ingest.ThreatIntelCollector")
 @patch("src.graph.source_selector")
@@ -50,12 +72,21 @@ def test_graph_malware_pending_queue_path(
     mock_selector,
     mock_intel_coll,
     mock_download,
+    mock_graph_ctx,
+    mock_ti_ctx,
     tmp_paths,
     minimal_pe_path,
 ):
+    from src.collection.context import CollectionContext
+
     sha = minimal_pe_path.sha256
     tracker = tmp_paths["tracker"]
     tracker.insert_pending_hash(sha, "2024-01-01")
+    steady_ctx = CollectionContext(
+        benign_count=100, malware_count=100, model_ready=True, pending_depth=1
+    )
+    mock_graph_ctx.return_value = steady_ctx
+    mock_ti_ctx.return_value = steady_ctx
 
     mock_selector.return_value = {
         "source_type": "malwarebazaar",

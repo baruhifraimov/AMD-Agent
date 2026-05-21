@@ -55,6 +55,7 @@ def test_malwarebazaar_empty_falls_back_to_threatfox_before_ddg(mock_coll_cls):
     tracker = MagicMock()
     tracker.is_downloaded.return_value = False
     tracker.is_corrupted.return_value = False
+    tracker.is_pending.return_value = False
 
     ctx = CollectionContext(benign_count=0, malware_count=0, model_ready=False, pending_depth=0)
     out = discover_with_fallback(
@@ -83,6 +84,7 @@ def test_malwarebazaar_empty_falls_back_to_twitter_before_ddg(mock_coll_cls):
     tracker = MagicMock()
     tracker.is_downloaded.return_value = False
     tracker.is_corrupted.return_value = False
+    tracker.is_pending.return_value = False
 
     ctx = CollectionContext(benign_count=0, malware_count=0, model_ready=False, pending_depth=0)
     out = discover_with_fallback(
@@ -114,6 +116,7 @@ def test_malwarebazaar_empty_falls_back_to_dynamic_cti_when_all_providers_empty(
     tracker = MagicMock()
     tracker.is_downloaded.return_value = False
     tracker.is_corrupted.return_value = False
+    tracker.is_pending.return_value = False
 
     ctx = CollectionContext(benign_count=0, malware_count=0, model_ready=False, pending_depth=0)
     out = discover_with_fallback(
@@ -145,6 +148,7 @@ def test_steady_phase_also_falls_back_to_ddg(mock_coll_cls):
     tracker = MagicMock()
     tracker.is_downloaded.return_value = False
     tracker.is_corrupted.return_value = False
+    tracker.is_pending.return_value = False
 
     ctx = CollectionContext(benign_count=100, malware_count=100, model_ready=True, pending_depth=0)
     assert ctx.phase == "steady"
@@ -159,3 +163,35 @@ def test_steady_phase_also_falls_back_to_ddg(mock_coll_cls):
     )
     assert len(out) == 1
     mock_coll.web_discover.assert_called_once_with(25, queries=["malware sha256 pe"])
+
+
+@patch("src.intel.collector.ThreatIntelCollector")
+def test_dynamic_cti_fallback_when_ctx_none(mock_coll_cls):
+    registry, _mb, _tf, _tw = _make_registry(
+        mb_discover=lambda _limit: [],
+        tf_discover=lambda _limit: [],
+        tw_discover=lambda _limit: [],
+    )
+
+    mock_coll = mock_coll_cls.return_value
+    mock_coll.web_discover.return_value = [
+        SampleCandidate("z" * 64, "dynamic_cti", 1, {"sha256": "z" * 64})
+    ]
+
+    tracker = MagicMock()
+    tracker.is_downloaded.return_value = False
+    tracker.is_corrupted.return_value = False
+    tracker.is_pending.return_value = False
+    tracker.count_by_label.return_value = {0: 100, 1: 100}
+
+    out = discover_with_fallback(
+        ["malwarebazaar"],
+        registry=registry,
+        tracker=tracker,
+        ctx=None,
+        expected_label=1,
+        limit=5,
+    )
+    assert len(out) == 1
+    assert out[0].provider == "dynamic_cti"
+    mock_coll.web_discover.assert_called_once()
