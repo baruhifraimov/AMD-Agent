@@ -54,7 +54,7 @@ def seed_curated_sources(store: IntelSourceStore) -> dict[str, Any]:
             source["url"],
             source_type=source.get("source_type", "rss"),
             discovery_query=f"curated:{source['name']}",
-            reset_zero_yield=True,
+            reset_zero_yield=False,
         )
         if sid is not None:
             seeded += 1

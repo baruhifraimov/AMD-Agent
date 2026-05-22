@@ -18,7 +18,11 @@ from src.intel.threatingestor_artifacts import (
     finalize_threatingestor_marks,
     poll_threatingestor_artifacts,
 )
-from src.intel.feed_discovery import discover_candidate_urls, is_low_signal_cti_url
+from src.intel.feed_discovery import (
+    discover_candidate_urls,
+    is_low_signal_cti_url,
+    is_precise_intel_source_url,
+)
 from src.intel.rss import parse_feed_entries
 from src.intel.seed_sources import seed_curated_sources
 from src.intel.source_store import IntelSourceStore, get_intel_source_store
@@ -103,7 +107,7 @@ class ThreatIntelCollector:
             source_id = int(source["id"])
             url = str(source["url"])
             source_type = str(source.get("source_type") or "rss")
-            if is_low_signal_cti_url(url):
+            if source_type != "rss" or is_low_signal_cti_url(url) or not is_precise_intel_source_url(url):
                 logger.info("Disabling low-signal CTI source: %s", url)
                 self.sources.disable_source(source_id)
                 poll_stats["sources_disabled"] += 1

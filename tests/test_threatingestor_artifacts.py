@@ -6,8 +6,10 @@ from contextlib import closing
 from src.intel.threatingestor_artifacts import (
     STATE_IGNORED,
     STATE_QUEUED,
+    artifact_state_counts,
     finalize_threatingestor_marks,
     poll_threatingestor_artifacts,
+    reset_ignored_sha256_artifacts,
 )
 
 
@@ -89,3 +91,28 @@ def test_finalize_marks_queued_and_known(tmp_path):
         s_k = conn.execute("SELECT state FROM hash WHERE artifact = ?", (sha_k,)).fetchone()[0]
     assert s_q == STATE_QUEUED
     assert s_k == STATE_QUEUED
+
+
+def test_reset_ignored_sha256_artifacts(tmp_path):
+    artifact_db = tmp_path / "threatingestor_artifacts.db"
+    _init_artifact_db(artifact_db)
+    sha = "e" * 64
+    md5 = "f" * 32
+    with closing(sqlite3.connect(artifact_db)) as conn:
+        conn.execute(
+            "INSERT INTO hash (artifact, created_date, state) VALUES (?, ?, ?)",
+            (sha, "t1", STATE_IGNORED),
+        )
+        conn.execute(
+            "INSERT INTO hash (artifact, created_date, state) VALUES (?, ?, ?)",
+            (md5, "t2", STATE_IGNORED),
+        )
+
+    before = artifact_state_counts(artifact_db=artifact_db)
+    reset = reset_ignored_sha256_artifacts(artifact_db=artifact_db)
+    after = artifact_state_counts(artifact_db=artifact_db)
+
+    assert before["ignored"] == 2
+    assert reset == 1
+    assert after["unprocessed"] == 1
+    assert after["ignored"] == 1

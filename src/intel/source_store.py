@@ -110,7 +110,9 @@ class IntelSourceStore:
             rows = conn.execute(
                 """
                 SELECT * FROM intel_sources
-                WHERE enabled = 1 AND next_poll_at <= ?
+                WHERE enabled = 1
+                  AND source_type != 'threatingestor'
+                  AND next_poll_at <= ?
                 ORDER BY yield_ratio DESC, next_poll_at ASC
                 LIMIT ?
                 """,

@@ -142,3 +142,76 @@ def finalize_threatingestor_marks(
         conn.commit()
     finally:
         conn.close()
+
+
+def artifact_state_counts(*, artifact_db: Path | None = None) -> dict[str, int]:
+    """Return ThreatIngestor hash artifact counters grouped by state."""
+    ensure_dirs()
+    artifact_db = artifact_db or THREATINGESTOR_ARTIFACT_DB
+    stats = {
+        "db_exists": 0,
+        "table_exists": 0,
+        "total": 0,
+        "sha256": 0,
+        "unprocessed": 0,
+        "queued": 0,
+        "ignored": 0,
+        "other_state": 0,
+    }
+    if not artifact_db.exists():
+        return stats
+    stats["db_exists"] = 1
+
+    conn = sqlite3.connect(artifact_db)
+    conn.row_factory = sqlite3.Row
+    try:
+        if not _table_exists(conn, "hash"):
+            return stats
+        stats["table_exists"] = 1
+        rows = conn.execute("SELECT artifact, state FROM hash").fetchall()
+    finally:
+        conn.close()
+
+    stats["total"] = len(rows)
+    for row in rows:
+        artifact = str(row["artifact"] or "").strip()
+        state = str(row["state"] or "").strip()
+        if SHA256_RE.fullmatch(artifact):
+            stats["sha256"] += 1
+        if not state:
+            stats["unprocessed"] += 1
+        elif state == STATE_QUEUED:
+            stats["queued"] += 1
+        elif state == STATE_IGNORED:
+            stats["ignored"] += 1
+        else:
+            stats["other_state"] += 1
+    return stats
+
+
+def reset_ignored_sha256_artifacts(*, artifact_db: Path | None = None) -> int:
+    """Reset ignored SHA256 artifacts so they can be revalidated after auth fixes."""
+    ensure_dirs()
+    artifact_db = artifact_db or THREATINGESTOR_ARTIFACT_DB
+    if not artifact_db.exists():
+        return 0
+
+    conn = sqlite3.connect(artifact_db)
+    try:
+        if not _table_exists(conn, "hash"):
+            return 0
+        rows = conn.execute(
+            "SELECT artifact FROM hash WHERE state = ?",
+            (STATE_IGNORED,),
+        ).fetchall()
+        shas = []
+        for row in rows:
+            artifact = str(row[0] or "").strip()
+            if SHA256_RE.fullmatch(artifact):
+                shas.append(artifact)
+        for sha in shas:
+            conn.execute("UPDATE hash SET state = NULL WHERE artifact = ?", (sha,))
+        conn.commit()
+        return len(shas)
+    finally:
+        conn.close()

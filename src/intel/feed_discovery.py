@@ -1,4 +1,4 @@
-"""Dynamic discovery of RSS feeds, blogs, and GitHub intel sources."""
+"""Dynamic discovery of precise RSS/Atom intel sources."""
 
 from __future__ import annotations
 
@@ -22,10 +22,19 @@ DEFAULT_DISCOVERY_QUERIES = [
 
 FEED_HINT_RE = re.compile(r"(feed|rss|atom|\.xml)", re.I)
 GITHUB_RE = re.compile(r"^https?://(?:www\.)?github\.com/[\w.-]+/[\w.-]+", re.I)
+LOW_SIGNAL_PATH_RE = re.compile(
+    r"(manualpe|malware-detection-pe-files|static-pe-malware-analysis|"
+    r"pe-structure|reverse-engineering|/abs/|/paper|/article)",
+    re.I,
+)
 LOW_SIGNAL_CTI_HOSTS = (
+    "acmrvce.com",
+    "arxiv.org",
     "coursehero.com",
     "frontiersin.org",
+    "github.com",
     "link.springer.com",
+    "medium.com",
     "mendeley.com",
     "mdpi.com",
     "researchgate.net",
@@ -35,11 +44,26 @@ LOW_SIGNAL_CTI_HOSTS = (
 
 
 def is_low_signal_cti_url(url: str) -> bool:
-    """Return True for hosts that tend to be academic/paywalled, not IOC feeds."""
-    host = (urlparse(url).hostname or "").lower()
+    """Return True for hosts/pages that tend to be articles, tutorials, or papers."""
+    parsed = urlparse(url)
+    host = (parsed.hostname or "").lower()
     if host.startswith("www."):
         host = host[4:]
-    return any(host == blocked or host.endswith(f".{blocked}") for blocked in LOW_SIGNAL_CTI_HOSTS)
+    if any(host == blocked or host.endswith(f".{blocked}") for blocked in LOW_SIGNAL_CTI_HOSTS):
+        return True
+    return bool(LOW_SIGNAL_PATH_RE.search(parsed.path or ""))
+
+
+def is_precise_intel_source_url(url: str) -> bool:
+    """Return True only for source URLs worth polling repeatedly.
+
+    Repeated polling should be reserved for structured feed endpoints. One-off
+    blog posts, GitHub tutorial pages, and papers are too slow and almost never
+    yield downloadable PE samples.
+    """
+    if not is_public_url(url) or is_low_signal_cti_url(url):
+        return False
+    return is_valid_feed_url(url)
 
 
 def classify_url(url: str) -> str:
@@ -73,30 +97,13 @@ def discover_candidate_urls(
                 continue
             seen.add(url)
             source_type = classify_url(url)
-            if source_type == "github":
-                candidates.append(
-                    {
-                        "url": url,
-                        "source_type": "github",
-                        "discovery_query": query,
-                        "title": row.get("title", ""),
-                    }
-                )
-            elif source_type == "blog":
-                if not _looks_like_security_blog(row, url):
+            if source_type == "rss_candidate" and _probe_feed(url):
+                normalized = _normalize_feed_url(url, "rss")
+                if not is_precise_intel_source_url(normalized):
                     continue
                 candidates.append(
                     {
-                        "url": url.rstrip("/"),
-                        "source_type": "blog",
-                        "discovery_query": query,
-                        "title": row.get("title", ""),
-                    }
-                )
-            elif source_type == "rss_candidate" and _probe_feed(url):
-                candidates.append(
-                    {
-                        "url": _normalize_feed_url(url, "rss"),
+                        "url": normalized,
                         "source_type": "rss",
                         "discovery_query": query,
                         "title": row.get("title", ""),
