@@ -14,7 +14,13 @@ from langgraph.graph import END, START, StateGraph
 
 import src.db.tracker as db
 from src.collection.context import build_collection_context
-from src.config import MIN_TRAIN_BENIGN, MIN_TRAIN_MALWARE, ensure_dirs
+from src.config import (
+    MIN_PE_SOURCES,
+    MIN_TRAIN_BENIGN,
+    MIN_TRAIN_MALWARE,
+    ensure_dirs,
+    pe_source_discovery_enabled,
+)
 from src.ml.classifier import load_bundle, model_bundle_ready, training_targets_met
 from src.nodes import (
     binary_fetch,
@@ -26,9 +32,11 @@ from src.nodes import (
     explain_drift_context,
     feature_extraction,
     model_retrain,
+    pe_source_discovery,
     source_discovery,
     source_selector,
 )
+from src.sources.pe_source_store import PESourceStore
 from src.runtime.scheduler import SchedulerLoop, load_scheduler_config
 from src.state import AgentState
 
@@ -53,11 +61,32 @@ def route_after_drift(state: AgentState) -> Literal["inference", "retrain"]:
 
 def route_after_selector(
     state: AgentState,
-) -> Literal["source_discovery", "threat_intel_ingest"]:
+) -> Literal["pe_source_discovery", "source_discovery", "threat_intel_ingest"]:
     if state.expected_label == 0:
         return "source_discovery"
     if build_collection_context().phase == "bootstrap":
         return "source_discovery"
+    if _should_run_pe_source_discovery(state):
+        return "pe_source_discovery"
+    if state.route_hint == "threat_intel_ingest":
+        return "threat_intel_ingest"
+    return "source_discovery"
+
+
+def _should_run_pe_source_discovery(state: AgentState) -> bool:
+    if not pe_source_discovery_enabled():
+        return False
+    if state.need_new_sources:
+        return True
+    try:
+        return PESourceStore().count_active() < MIN_PE_SOURCES
+    except Exception:
+        return False
+
+
+def route_after_pe_discovery(
+    state: AgentState,
+) -> Literal["threat_intel_ingest", "source_discovery"]:
     if state.route_hint == "threat_intel_ingest":
         return "threat_intel_ingest"
     return "source_discovery"
@@ -80,6 +109,7 @@ def build_graph():
     graph = StateGraph(AgentState)
 
     graph.add_node("source_selector", _wrap(source_selector))
+    graph.add_node("pe_source_discovery", _wrap(pe_source_discovery))
     graph.add_node("threat_intel_ingest", _wrap(threat_intel_ingest))
     graph.add_node("source_discovery", _wrap(source_discovery))
     graph.add_node("binary_fetch", _wrap(binary_fetch))
@@ -96,8 +126,17 @@ def build_graph():
         "source_selector",
         route_after_selector,
         {
+            "pe_source_discovery": "pe_source_discovery",
             "source_discovery": "source_discovery",
             "threat_intel_ingest": "threat_intel_ingest",
+        },
+    )
+    graph.add_conditional_edges(
+        "pe_source_discovery",
+        route_after_pe_discovery,
+        {
+            "threat_intel_ingest": "threat_intel_ingest",
+            "source_discovery": "source_discovery",
         },
     )
     graph.add_conditional_edges(
@@ -125,6 +164,8 @@ def build_graph():
     graph.add_edge("model_retrain", "evaluation")
     graph.add_edge("evaluation", END)
 
+    if _CHECKPOINTER is None:
+        return graph.compile()
     return graph.compile(checkpointer=_CHECKPOINTER)
 
 

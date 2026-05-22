@@ -11,10 +11,16 @@ from urllib.parse import urlparse
 
 import httpx
 
-from src.config import CTI_DOWNLOAD_ALLOWLIST, PE_DOWNLOAD_MAX_BYTES, get_github_token
+from src.config import (
+    CTI_DOWNLOAD_ALLOWLIST,
+    PE_DOWNLOAD_MAX_BYTES,
+    get_github_token,
+    malshare_enabled,
+    mb_fallback_malshare,
+)
 from src.sources.base import SampleCandidate
 from src.sources.registry import get_registry
-from src.tools import malwarebazaar as mb
+from src.tools import malwarebazaar_api as mb
 from src.tools.cti_search import is_public_url
 
 logger = logging.getLogger(__name__)
@@ -32,17 +38,34 @@ def download_pe_candidate(candidate: SampleCandidate) -> bytes:
             return _download_mb_with_retry(sha)
         except Exception as exc:
             logger.info("MalwareBazaar download failed for %s: %s", sha, exc)
+            if malshare_enabled() and mb_fallback_malshare():
+                try:
+                    return _download_malshare(sha, ref)
+                except Exception as ms_exc:
+                    logger.info("MalShare fallback failed for %s: %s", sha, ms_exc)
 
     fallback = str(ref.get("fallback_url") or "").strip()
     if fallback:
         return _download_direct_url(fallback)
 
-    if candidate.provider and candidate.provider not in ("malwarebazaar", "intel_direct"):
+    if candidate.provider and candidate.provider not in (
+        "malwarebazaar",
+        "intel_direct",
+        "malshare",
+    ):
         return get_registry().get(candidate.provider).download(candidate)
 
     if len(sha) == 64:
         raise RuntimeError(f"No download path succeeded for {sha}")
     raise RuntimeError(f"No download path for candidate {candidate.external_id}")
+
+
+def _download_malshare(sha256: str, ref: dict[str, Any]) -> bytes:
+    from src.tools.clients.malshare_api_client import MalShareClient
+
+    client = MalShareClient.from_config()
+    h = str(ref.get("hash") or sha256).lower()
+    return client.download(h)
 
 
 def _download_mb_with_retry(sha256: str) -> bytes:

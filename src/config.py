@@ -45,7 +45,15 @@ FEATURE_DIM = 2304
 # Benign / malware collection balance
 MIN_BENIGN_FOR_FPR = MIN_TRAIN_BENIGN
 TARGET_MALWARE_BENIGN_RATIO = 1.0
-BENIGN_PROVIDER_NAMES = ("sysinternals", "github")
+BENIGN_PROVIDER_NAMES = ("sysinternals", "github", "benign_net")
+MALSHARE_API_KEY_ENV = "MALSHARE_API_KEY"
+MALSHARE_ENABLED_ENV = "AMD_MALSHARE_ENABLED"
+MB_FALLBACK_MALSHARE_ENV = "AMD_MB_FALLBACK_MALSHARE"
+BENIGN_NET_REPO_URL_ENV = "BENIGN_NET_REPO_URL"
+BENIGN_NET_MAX_DISCOVER_ENV = "BENIGN_NET_MAX_DISCOVER"
+PE_SOURCE_DISCOVERY_ENV = "AMD_PE_SOURCE_DISCOVERY"
+PE_DISCOVERY_MAX_URLS_ENV = "AMD_PE_DISCOVERY_MAX_URLS_PER_RUN"
+MIN_PE_SOURCES_ENV = "MIN_PE_SOURCES"
 ALLOW_LOCAL_BENIGN_ENV = "AMD_ALLOW_LOCAL_BENIGN"
 THREAT_QUEUE_ENABLED_ENV = "AMD_THREAT_QUEUE_ENABLED"
 INTEL_INGEST_ENABLED_ENV = "AMD_INTEL_INGEST_ENABLED"
@@ -364,6 +372,7 @@ def ensure_dirs() -> None:
         EVAL_STATE_PATH.parent,
         DRIFT_LOG_PATH.parent,
         THREATINGESTOR_ARTIFACT_DB.parent,
+        REPOS_DIR,
     ):
         path.mkdir(parents=True, exist_ok=True)
 
@@ -381,3 +390,27 @@ def get_github_token() -> str:
 
 def allow_local_benign() -> bool:
     return os.getenv(ALLOW_LOCAL_BENIGN_ENV, "").strip() in ("1", "true", "yes")
+
+
+def malshare_enabled() -> bool:
+    return os.getenv(MALSHARE_ENABLED_ENV, "0").strip() in ("1", "true", "yes")
+
+
+def mb_fallback_malshare() -> bool:
+    return os.getenv(MB_FALLBACK_MALSHARE_ENV, "0").strip() in ("1", "true", "yes")
+
+
+def pe_source_discovery_enabled() -> bool:
+    return os.getenv(PE_SOURCE_DISCOVERY_ENV, "0").strip() in ("1", "true", "yes")
+
+
+BENIGN_NET_REPO_URL = os.getenv(
+    BENIGN_NET_REPO_URL_ENV,
+    "https://github.com/bormaa/Benign-NET.git",
+).strip()
+BENIGN_NET_MAX_DISCOVER = max(1, int(os.getenv(BENIGN_NET_MAX_DISCOVER_ENV, "20")))
+PE_DISCOVERY_MAX_URLS = max(1, int(os.getenv(PE_DISCOVERY_MAX_URLS_ENV, "8")))
+MIN_PE_SOURCES = max(1, int(os.getenv(MIN_PE_SOURCES_ENV, "3")))
+REPOS_DIR = PROJECT_ROOT / "data" / "repos"
+if _in_container:
+    REPOS_DIR = Path("/data/repos")

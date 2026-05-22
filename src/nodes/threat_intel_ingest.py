@@ -15,7 +15,7 @@ from src.config import (
 )
 from src.intel.collector import ThreatIntelCollector
 from src.state import AgentState
-from src.tools.malwarebazaar import reset_mb_run_budget
+from src.tools.malwarebazaar_api import reset_mb_run_budget
 
 logger = logging.getLogger(__name__)
 

@@ -7,7 +7,7 @@ import logging
 import src.db.tracker as db
 from src.collection.context import CollectionContext, build_collection_context
 from src.config import MALWARE_FALLBACK_PROVIDERS, PE_FETCH_LIMIT
-from src.tools.malwarebazaar import reset_mb_run_budget
+from src.tools.malwarebazaar_api import reset_mb_run_budget
 from src.sources.base import SampleCandidate
 from src.sources.registry import SourceRegistry, get_registry
 

@@ -39,6 +39,16 @@ def choose_benign_provider(registry: SourceRegistry) -> PESourceProvider:
     if forced:
         return registry.get(forced)
 
+    if "benign_net" in registry.list_names():
+        try:
+            from src.sources.pe_source_store import PESourceStore
+
+            store = PESourceStore()
+            if store.list_active_by_type("benign_only", limit=1):
+                return registry.get("benign_net")
+        except Exception:
+            pass
+
     global _BENIGN_ROUND_ROBIN_IDX
     names = [n for n in BENIGN_PROVIDER_NAMES if n in registry.list_names()]
     if not names:

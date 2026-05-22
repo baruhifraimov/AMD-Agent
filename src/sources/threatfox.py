@@ -6,8 +6,8 @@ import logging
 
 from src.config import FALLBACK_PE_CHECK_MULT
 from src.sources.base import PESourceProvider, SampleCandidate
-from src.tools import malwarebazaar as mb
-from src.tools import threatfox as tf
+from src.tools import malwarebazaar_api as mb
+from src.tools import threatfox_api as tf
 
 logger = logging.getLogger(__name__)
 

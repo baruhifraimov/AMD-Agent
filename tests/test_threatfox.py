@@ -3,7 +3,7 @@
 from unittest.mock import patch
 
 from src.sources.threatfox import ThreatFoxProvider
-from src.tools import threatfox as tf
+from src.tools import threatfox_api as tf
 
 
 def test_extract_sha256_from_ioc_row():
@@ -17,7 +17,7 @@ def test_extract_sha256_from_ioc_row():
 
 
 def test_get_recent_sha256_hashes_filters_domains(httpx_mock, monkeypatch):
-    monkeypatch.setattr("src.tools.threatfox.get_auth_key", lambda: "test-key")
+    monkeypatch.setattr("src.tools.clients.threatfox_api_client.get_auth_key", lambda: "test-key")
     httpx_mock.add_response(
         url=tf.API_URL,
         method="POST",
@@ -69,7 +69,7 @@ def test_threatfox_provider_skips_non_pe_mb(mock_get, _mock_pe):
 
 
 def test_get_social_sha256_hashes_filters_by_twitter_reference(httpx_mock, monkeypatch):
-    monkeypatch.setattr("src.tools.threatfox.get_auth_key", lambda: "test-key")
+    monkeypatch.setattr("src.tools.clients.threatfox_api_client.get_auth_key", lambda: "test-key")
     httpx_mock.add_response(
         url=tf.API_URL,
         method="POST",

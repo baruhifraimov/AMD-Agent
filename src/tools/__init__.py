@@ -1,7 +1,7 @@
 """Tool integrations for the agent."""
 
 from src.tools.fetch import save_pe_to_sandbox
-from src.tools.malwarebazaar import (
+from src.tools.malwarebazaar_api import (
     download_sample,
     get_file_type,
     get_file_info,

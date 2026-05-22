@@ -28,7 +28,7 @@ from src.intel.seed_sources import seed_curated_sources
 from src.intel.source_store import IntelSourceStore, get_intel_source_store
 from src.llm import semantic_filter_hashes
 from src.sources.base import SampleCandidate
-from src.tools import malwarebazaar as mb
+from src.tools import malwarebazaar_api as mb
 from src.tools.cti_search import extract_hash_contexts, extract_pe_urls, fetch_public_text
 from src.tools.update import insert_pending_hash
 

@@ -50,6 +50,10 @@ are treated as stale and retrained.
   - SHA256-based sample download,
   - password-protected ZIP extraction using password `infected`.
 
+- MalShare API (optional, `AMD_MALSHARE_ENABLED=1`):
+  - `PE32` hash listing and `getfile` download,
+  - fallback when MalwareBazaar circuit/quota blocks (`AMD_MB_FALLBACK_MALSHARE=1`).
+
 - Dynamic CTI discovery:
   - configurable `ddgs` backends and optional Brave Search API,
   - public CTI page fetching with strict byte truncation,
@@ -62,7 +66,14 @@ Dynamic CTI uses a Hybrid Strict policy: CTI pages are used only as evidence for
 
 - Sysinternals live directory.
 - GitHub release `.exe` and `.zip` assets from curated benign repositories.
+- Benign-NET (`benign_net` provider): shallow git clone under `data/repos/benign-net` (capped per run via `BENIGN_NET_MAX_DISCOVER`).
 - Optional local benign corpus under `data/benign`.
+
+### PE source registry (optional)
+
+- `pe_sources` SQLite table stores discovered dataset/API/repo metadata (`PESourceStore`).
+- Enable autonomous URL discovery with `AMD_PE_SOURCE_DISCOVERY=1` (node `pe_source_discovery` runs before steady malware ingest when active sources are below `MIN_PE_SOURCES` or after concept drift).
+- OOP HTTP clients live under `src/tools/clients/` (`MalwareBazaarClient`, `MalShareClient`, `ThreatFoxClient`).
 
 ## Safety And Persistence
 
@@ -175,7 +186,15 @@ Other useful variables:
 |---|---|
 | `GITHUB_TOKEN` | optional GitHub token for release API rate limits |
 | `MALWAREBAZAAR_AUTH_KEY` | abuse.ch key for MalwareBazaar, ThreatFox, and Twitter/X CTI (social refs via ThreatFox API) |
-| `AMD_BENIGN_PROVIDER` | force benign provider: `sysinternals` or `github` |
+| `AMD_BENIGN_PROVIDER` | force benign provider: `sysinternals`, `github`, or `benign_net` |
+| `MALSHARE_API_KEY` | MalShare API key (optional malware source) |
+| `AMD_MALSHARE_ENABLED` | enable MalShare provider and client (`0`/`1`) |
+| `AMD_MB_FALLBACK_MALSHARE` | try MalShare when MalwareBazaar download fails (`0`/`1`) |
+| `BENIGN_NET_REPO_URL` | git URL for Benign-NET clone (default bormaa/Benign-NET) |
+| `BENIGN_NET_MAX_DISCOVER` | max `.exe` paths discovered per run from Benign-NET (default `20`) |
+| `AMD_PE_SOURCE_DISCOVERY` | enable `pe_source_discovery` node and URL registry updates (`0`/`1`) |
+| `AMD_PE_DISCOVERY_MAX_URLS_PER_RUN` | max URLs fetched/classified per discovery pass (default `8`) |
+| `MIN_PE_SOURCES` | run PE discovery when active `pe_sources` count is below this (default `3`) |
 | `AMD_ALLOW_LOCAL_BENIGN` | ingest `data/benign/*` as label `0` |
 | `AMD_INTEL_INGEST_ENABLED` | enable/disable integrated threat intel ingest node |
 | `AMD_CTI_SEED_SOURCES_ENABLED` | seed known CTI feeds into `intel_sources` before polling (default `1`) |

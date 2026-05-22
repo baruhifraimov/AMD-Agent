@@ -31,10 +31,12 @@ VERIFIED_DISCOVERY_SOURCES = frozenset(
 VERIFIED_SOURCE_PROVIDERS = frozenset(
     {
         "malwarebazaar",
+        "malshare",
         "threatfox",
         "twitter",
         "sysinternals",
         "github",
+        "benign_net",
         "dynamic_cti",
     }
 )
