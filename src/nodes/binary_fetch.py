@@ -32,6 +32,17 @@ def binary_fetch(state: AgentState) -> dict:
         candidate = SampleCandidate.from_dict(raw)
         try:
             candidate_sha = str(candidate.download_ref.get("sha256") or candidate.external_id).lower()
+            source_url = (
+                candidate.download_ref.get("url")
+                or candidate.download_ref.get("fallback_url")
+                or candidate.download_ref.get("path")
+                or candidate.metadata.get("source_url")
+                or ""
+            )
+            if source_url and tracker.is_source_url_seen(str(source_url)):
+                logger.info("Already seen source URL, skipping before fetch: %s", source_url)
+                skipped += 1
+                continue
             if len(candidate_sha) == 64 and tracker.is_corrupted(candidate_sha):
                 logger.info("Skipping previously corrupted sample: %s", candidate_sha)
                 skipped += 1
@@ -62,6 +73,11 @@ def binary_fetch(state: AgentState) -> dict:
                 skipped += 1
                 continue
             if tracker.is_downloaded(sha):
+                tracker.record_sample_source(
+                    sha,
+                    source_provider=candidate.provider,
+                    source_url=str(source_url),
+                )
                 logger.info("Already downloaded, skipping: %s", sha)
                 skipped += 1
                 continue
@@ -73,12 +89,6 @@ def binary_fetch(state: AgentState) -> dict:
             meta["first_seen"] = meta.get("first_seen") or db.MalwareTracker.utc_now_iso()
             meta["expected_label"] = candidate.expected_label
             meta["source_provider"] = candidate.provider
-            source_url = (
-                candidate.download_ref.get("url")
-                or candidate.download_ref.get("fallback_url")
-                or candidate.metadata.get("source_url")
-                or ""
-            )
             if source_url:
                 meta["source_url"] = source_url
             metadata[sha] = meta

@@ -6,7 +6,7 @@ import logging
 
 import src.db.tracker as db
 from src.collection.context import CollectionContext, build_collection_context
-from src.config import MALWARE_FALLBACK_PROVIDERS, PE_FETCH_LIMIT, malshare_enabled
+from src.config import BENIGN_PROVIDER_NAMES, MALWARE_FALLBACK_PROVIDERS, PE_FETCH_LIMIT, malshare_enabled
 from src.tools.malwarebazaar_api import reset_mb_run_budget
 from src.sources.base import SampleCandidate
 from src.sources.registry import SourceRegistry, get_registry
@@ -25,6 +25,7 @@ def _known_bad_or_downloaded(candidate: SampleCandidate, tracker: db.MalwareTrac
     source_url = str(
         candidate.download_ref.get("url")
         or candidate.download_ref.get("fallback_url")
+        or candidate.download_ref.get("path")
         or candidate.metadata.get("source_url")
         or ""
     )
@@ -209,6 +210,130 @@ def discover_active_malware_sources(
             for item in topup_stats:
                 topup_item = dict(item)
                 topup_item["stage"] = "active_malware_topup"
+                stats.append(topup_item)
+
+    return candidates[:fetch_limit]
+
+
+def _source_slots(source_names: list[str], fetch_limit: int) -> dict[str, int]:
+    if not source_names:
+        return {}
+    base = fetch_limit // len(source_names)
+    extra = fetch_limit % len(source_names)
+    return {
+        name: base + (1 if idx < extra else 0)
+        for idx, name in enumerate(source_names)
+    }
+
+
+def discover_active_benign_sources(
+    source_names: list[str],
+    *,
+    registry: SourceRegistry | None = None,
+    tracker: db.MalwareTracker | None = None,
+    ctx: CollectionContext | None = None,
+    limit: int | None = None,
+    stats: list[dict] | None = None,
+) -> list[SampleCandidate]:
+    """Discover benign samples across all selected benign providers."""
+    registry = registry or get_registry()
+    tracker = tracker or db.get_tracker()
+    if ctx is None:
+        ctx = build_collection_context(tracker)
+    fetch_limit = limit or PE_FETCH_LIMIT
+    available = set(registry.list_names())
+    active_sources = [
+        name
+        for name in list(dict.fromkeys(source_names))
+        if name in available and name in BENIGN_PROVIDER_NAMES
+    ]
+    if not active_sources:
+        return []
+    if len(active_sources) == 1:
+        return discover_with_fallback(
+            active_sources,
+            registry=registry,
+            tracker=tracker,
+            ctx=ctx,
+            expected_label=0,
+            limit=fetch_limit,
+            stats=stats,
+        )
+
+    candidates: list[SampleCandidate] = []
+    seen: set[str] = set()
+    slots = _source_slots(active_sources, fetch_limit)
+    for source_name in active_sources:
+        slot = slots[source_name]
+        if slot <= 0:
+            continue
+        provider_name = source_name
+        try:
+            provider_name, discovered = _discover_source_candidates(
+                source_name,
+                request_limit=max(slot * 5, 1),
+                registry=registry,
+                tracker=tracker,
+            )
+        except Exception as exc:
+            logger.warning("Discovery failed for provider=%s: %s", provider_name, exc)
+            if stats is not None:
+                stats.append(
+                    {
+                        "stage": "active_benign_fill",
+                        "provider": provider_name,
+                        "discovered": 0,
+                        "fresh": 0,
+                        "returned": 0,
+                        "label": 0,
+                        "phase": ctx.phase,
+                        "error": str(exc),
+                    }
+                )
+            continue
+
+        fresh, returned = _append_fresh_candidates(
+            candidates,
+            discovered,
+            tracker=tracker,
+            seen=seen,
+            fetch_limit=len(candidates) + slot,
+        )
+        if stats is not None:
+            stats.append(
+                {
+                    "stage": "active_benign_fill",
+                    "provider": provider_name,
+                    "discovered": len(discovered),
+                    "fresh": fresh,
+                    "returned": returned,
+                    "label": 0,
+                    "phase": ctx.phase,
+                }
+            )
+
+    if len(candidates) < fetch_limit:
+        topup_stats: list[dict] = []
+        topup = discover_with_fallback(
+            active_sources,
+            registry=registry,
+            tracker=tracker,
+            ctx=ctx,
+            expected_label=0,
+            limit=fetch_limit - len(candidates),
+            stats=topup_stats,
+        )
+        _append_fresh_candidates(
+            candidates,
+            topup,
+            tracker=tracker,
+            seen=seen,
+            fetch_limit=fetch_limit,
+        )
+        if stats is not None:
+            for item in topup_stats:
+                topup_item = dict(item)
+                topup_item["stage"] = "active_benign_topup"
                 stats.append(topup_item)
 
     return candidates[:fetch_limit]

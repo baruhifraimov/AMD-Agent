@@ -35,9 +35,13 @@ def next_label(n_malware: int, n_benign: int) -> int:
 
 
 def choose_benign_provider(registry: SourceRegistry) -> PESourceProvider:
+    return registry.get(choose_benign_sources(registry)[0])
+
+
+def choose_benign_sources(registry: SourceRegistry) -> list[str]:
     forced = os.getenv("AMD_BENIGN_PROVIDER", "").strip().lower()
     if forced:
-        return registry.get(forced)
+        return [registry.get(forced).name]
 
     if "benign_net" in registry.list_names():
         try:
@@ -45,7 +49,13 @@ def choose_benign_provider(registry: SourceRegistry) -> PESourceProvider:
 
             store = PESourceStore()
             if store.list_active_by_type("benign_only", limit=1):
-                return registry.get("benign_net")
+                names = ["benign_net"]
+                names.extend(
+                    n
+                    for n in BENIGN_PROVIDER_NAMES
+                    if n in registry.list_names() and n not in names
+                )
+                return names
         except Exception:
             pass
 
@@ -53,6 +63,6 @@ def choose_benign_provider(registry: SourceRegistry) -> PESourceProvider:
     names = [n for n in BENIGN_PROVIDER_NAMES if n in registry.list_names()]
     if not names:
         raise RuntimeError("No benign providers registered")
-    name = names[_BENIGN_ROUND_ROBIN_IDX % len(names)]
+    start = _BENIGN_ROUND_ROBIN_IDX % len(names)
     _BENIGN_ROUND_ROBIN_IDX += 1
-    return registry.get(name)
+    return names[start:] + names[:start]

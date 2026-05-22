@@ -7,6 +7,7 @@ import logging
 import src.db.tracker as db
 from src.collection import (
     build_collection_context,
+    discover_active_benign_sources,
     discover_active_malware_sources,
     discover_with_fallback,
 )
@@ -27,6 +28,14 @@ def source_discovery(state: AgentState) -> dict:
             ctx=ctx,
             limit=None,
             cti_queries=state.cti_queries or None,
+            stats=discovery_stats,
+        )
+    elif state.expected_label == 0:
+        candidates = discover_active_benign_sources(
+            source_names,
+            tracker=tracker,
+            ctx=ctx,
+            limit=None,
             stats=discovery_stats,
         )
     else:

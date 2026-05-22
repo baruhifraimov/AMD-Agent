@@ -175,8 +175,8 @@ def test_binary_fetch_uses_candidate_provider(mock_download, mock_intel_cls, tmp
     assert mock_download.call_count == 2
 
 
-@patch("src.nodes.source_discovery.discover_with_fallback")
-def test_source_discovery_uses_selected_sources(mock_discover, tmp_paths):
+@patch("src.nodes.source_discovery.discover_active_benign_sources")
+def test_source_discovery_uses_selected_benign_sources(mock_discover, tmp_paths):
     def discover_side_effect(*args, **kwargs):
         kwargs["stats"].append(
             {
@@ -263,6 +263,32 @@ def test_binary_fetch_skips_known_sha_before_download(mock_download, tmp_paths, 
 
     assert out["downloaded_paths"] == []
     mock_download.assert_not_called()
+
+
+@patch("src.nodes.binary_fetch.ThreatIntelCollector")
+@patch("src.nodes.binary_fetch.download_pe_candidate")
+def test_binary_fetch_records_source_url_for_duplicate_hash(
+    mock_download,
+    mock_intel_cls,
+    tmp_paths,
+    minimal_pe_path,
+):
+    tracker = tmp_paths["tracker"]
+    tracker.insert_sample(minimal_pe_path.sha256, str(minimal_pe_path.path), "2024-01-01", label=0)
+    mock_download.return_value = minimal_pe_path.path.read_bytes()
+    mock_intel_cls.return_value.record_download_outcome.return_value = None
+    url = "https://live.sysinternals.com/tool.exe"
+
+    out = binary_fetch(
+        AgentState(
+            sample_candidates=[
+                SampleCandidate(url, "sysinternals", 0, {"url": url}).to_dict()
+            ]
+        )
+    )
+
+    assert out["downloaded_paths"] == []
+    assert tracker.is_source_url_seen(url) is True
 
 
 @patch("src.nodes.source_selector.choose_sources_with_ollama", return_value=None)

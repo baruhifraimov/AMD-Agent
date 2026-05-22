@@ -5,7 +5,7 @@ from __future__ import annotations
 from src.collection.context import CollectionContext
 from src.collection.strategies.base import SourceSelectionResult
 from src.config import MIN_TRAIN_BENIGN, MIN_TRAIN_MALWARE
-from src.collection.balance import choose_benign_provider
+from src.collection.balance import choose_benign_sources
 from src.sources.registry import get_registry
 
 
@@ -27,10 +27,11 @@ class BootstrapSelectionStrategy:
             )
 
         if benign_deficit > 0:
-            provider = choose_benign_provider(registry)
+            selected_sources = choose_benign_sources(registry)
+            provider = registry.get(selected_sources[0])
             return SourceSelectionResult(
                 source_type=provider.name,
-                selected_sources=[provider.name],
+                selected_sources=selected_sources,
                 expected_label=0,
                 discovery_strategy="bootstrap_fast_path",
                 collection_phase="bootstrap",

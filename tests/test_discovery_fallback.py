@@ -81,6 +81,38 @@ def _active_registry(mb_discover, ms_discover):
     return registry, mb, ms
 
 
+def _active_benign_registry(sys_discover, gh_discover, bn_discover=None):
+    sysinternals = MagicMock()
+    sysinternals.name = "sysinternals"
+    sysinternals.expected_label = 0
+    sysinternals.discover.side_effect = sys_discover
+
+    github = MagicMock()
+    github.name = "github"
+    github.expected_label = 0
+    github.discover.side_effect = gh_discover
+
+    benign_net = MagicMock()
+    benign_net.name = "benign_net"
+    benign_net.expected_label = 0
+    benign_net.discover.side_effect = bn_discover or (lambda _limit: [])
+
+    registry = MagicMock()
+    registry.list_names.return_value = ["sysinternals", "github", "benign_net"]
+
+    def get(name):
+        if name == "sysinternals":
+            return sysinternals
+        if name == "github":
+            return github
+        if name == "benign_net":
+            return benign_net
+        raise KeyError(name)
+
+    registry.get.side_effect = get
+    return registry, sysinternals, github, benign_net
+
+
 def _tracker():
     tracker = MagicMock()
     tracker.is_downloaded.return_value = False
@@ -170,6 +202,53 @@ def test_active_malware_sources_deduplicates_malshare_overlap(monkeypatch):
 
     assert len(out) == 1
     assert out[0].provider == "malwarebazaar"
+
+
+def test_active_benign_sources_split_across_selected_providers():
+    from src.collection.discovery_chain import discover_active_benign_sources
+
+    registry, sysinternals, github, benign_net = _active_benign_registry(
+        sys_discover=lambda _limit: [
+            SampleCandidate("s1", "sysinternals", 0, {"url": "https://s/1.exe"}),
+            SampleCandidate("s2", "sysinternals", 0, {"url": "https://s/2.exe"}),
+        ],
+        gh_discover=lambda _limit: [
+            SampleCandidate("g1", "github", 0, {"url": "https://g/1.exe"}),
+            SampleCandidate("g2", "github", 0, {"url": "https://g/2.exe"}),
+        ],
+        bn_discover=lambda _limit: [
+            SampleCandidate("b1", "benign_net", 0, {"path": "/repo/b1.exe"}),
+            SampleCandidate("b2", "benign_net", 0, {"path": "/repo/b2.exe"}),
+        ],
+    )
+    ctx = CollectionContext(benign_count=100, malware_count=100, model_ready=True, pending_depth=0)
+    stats: list[dict] = []
+
+    out = discover_active_benign_sources(
+        ["sysinternals", "github", "benign_net"],
+        registry=registry,
+        tracker=_tracker(),
+        ctx=ctx,
+        limit=6,
+        stats=stats,
+    )
+
+    assert [candidate.provider for candidate in out] == [
+        "sysinternals",
+        "sysinternals",
+        "github",
+        "github",
+        "benign_net",
+        "benign_net",
+    ]
+    sysinternals.discover.assert_called_once_with(10)
+    github.discover.assert_called_once_with(10)
+    benign_net.discover.assert_called_once_with(10)
+    assert [item["provider"] for item in stats[:3]] == [
+        "sysinternals",
+        "github",
+        "benign_net",
+    ]
 
 
 @patch("src.intel.collector.ThreatIntelCollector")

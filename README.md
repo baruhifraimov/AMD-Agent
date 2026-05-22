@@ -85,6 +85,7 @@ Dynamic CTI uses a Hybrid Strict policy: CTI pages are used only as evidence for
 - SQLite uses WAL mode to reduce lock errors with external ThreatIngestor writes.
 - LangGraph uses `MemorySaver` checkpointer with default thread id `amd-agent-default`.
 - Downloaded samples are stored under sandbox paths and are never executed.
+- Benign collection fans out across selected providers (`sysinternals`, `github`, `benign_net`) and records source URLs/paths to avoid retrying the same assets.
 
 ## SQLite Sample Status
 

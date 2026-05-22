@@ -228,8 +228,10 @@ SYSINTERNALS_BASE_URLS = (
 GITHUB_API_URL = "https://api.github.com"
 GITHUB_TOKEN_ENV = "GITHUB_TOKEN"
 GITHUB_BENIGN_REPOS: list[tuple[str, str]] = [
-    ("microsoft", "Sysinternals"),
-    ("NotepadPlusPlus", "notepad-plus-plus"),
+    ("notepad-plus-plus", "notepad-plus-plus"),
+    ("ShareX", "ShareX"),
+    ("git-for-windows", "git"),
+    ("microsoft", "PowerToys"),
 ]
 
 EXEC_API_NAMES = frozenset(

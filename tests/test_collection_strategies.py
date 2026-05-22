@@ -27,6 +27,7 @@ def test_bootstrap_selects_benign_when_deficit(mock_reg):
     assert result.expected_label == 0
     assert result.collection_phase == "bootstrap"
     assert result.source_type in ("sysinternals", "github")
+    assert set(result.selected_sources) == {"sysinternals", "github"}
 
 
 @patch("src.collection.strategies.bootstrap.get_registry", side_effect=lambda: _registry())
@@ -60,6 +61,14 @@ def test_steady_pending_routes_to_intel(mock_reg):
     result = SteadyStateSelectionStrategy().select(ctx)
     assert result.route_hint == "threat_intel_ingest"
     assert result.selected_sources == ["malwarebazaar"]
+
+
+@patch("src.collection.strategies.steady.get_registry", side_effect=lambda: _registry())
+def test_steady_selects_all_benign_sources_when_benign_needed(mock_reg):
+    ctx = CollectionContext(benign_count=100, malware_count=130, model_ready=True, pending_depth=0)
+    result = SteadyStateSelectionStrategy().select(ctx)
+    assert result.expected_label == 0
+    assert set(result.selected_sources) == {"sysinternals", "github"}
 
 
 @patch("src.collection.strategies.steady.get_registry", side_effect=lambda: _registry())

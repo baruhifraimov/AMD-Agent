@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from src.collection.context import CollectionContext
 from src.collection.strategies.base import SourceSelectionResult
-from src.collection.balance import choose_benign_provider, next_label
+from src.collection.balance import choose_benign_sources, next_label
 from src.sources.registry import get_registry
 
 
@@ -12,10 +12,11 @@ class SteadyStateSelectionStrategy:
     def select(self, ctx: CollectionContext) -> SourceSelectionResult:
         registry = get_registry()
         if next_label(ctx.malware_count, ctx.benign_count) == 0:
-            provider = choose_benign_provider(registry)
+            selected_sources = choose_benign_sources(registry)
+            provider = registry.get(selected_sources[0])
             return SourceSelectionResult(
                 source_type=provider.name,
-                selected_sources=[provider.name],
+                selected_sources=selected_sources,
                 expected_label=0,
                 discovery_strategy="steady_benign_balance",
                 collection_phase="steady",

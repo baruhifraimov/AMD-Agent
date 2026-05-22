@@ -43,6 +43,13 @@ CREATE TABLE IF NOT EXISTS mb_api_usage (
     usage_date TEXT PRIMARY KEY,
     get_file_count INTEGER NOT NULL DEFAULT 0
 );
+CREATE TABLE IF NOT EXISTS sample_sources (
+    source_url TEXT PRIMARY KEY,
+    sha256 TEXT NOT NULL,
+    source_provider TEXT,
+    first_seen_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_sample_sources_sha256 ON sample_sources(sha256);
 """
 
 
@@ -105,6 +112,26 @@ class MalwareTracker:
         conn.execute("CREATE INDEX IF NOT EXISTS idx_samples_status ON samples(status)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_samples_source_url ON samples(source_url)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_samples_feature_version ON samples(feature_version)")
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS sample_sources (
+                source_url TEXT PRIMARY KEY,
+                sha256 TEXT NOT NULL,
+                source_provider TEXT,
+                first_seen_at TEXT NOT NULL
+            )
+            """
+        )
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_sample_sources_sha256 ON sample_sources(sha256)")
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO sample_sources
+            (source_url, sha256, source_provider, first_seen_at)
+            SELECT source_url, sha256, source_provider, acquired_at
+            FROM samples
+            WHERE source_url IS NOT NULL AND source_url != ''
+            """
+        )
 
     def hash_exists(self, sha256: str) -> bool:
         with self._connect() as conn:
@@ -163,7 +190,46 @@ class MalwareTracker:
                 """,
                 (normalized,),
             ).fetchone()
+            if row is None:
+                row = conn.execute(
+                    """
+                    SELECT 1 FROM sample_sources ss
+                    JOIN samples s ON s.sha256 = ss.sha256
+                    WHERE ss.source_url = ?
+                      AND COALESCE(s.status, 'active') != 'corrupted'
+                    """,
+                    (normalized,),
+                ).fetchone()
         return row is not None
+
+    def record_sample_source(
+        self,
+        sha256: str,
+        *,
+        source_provider: str | None = None,
+        source_url: str | None = None,
+    ) -> None:
+        normalized = (source_url or "").strip()
+        if not normalized:
+            return
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO sample_sources
+                (source_url, sha256, source_provider, first_seen_at)
+                VALUES (?, ?, ?, ?)
+                """,
+                (normalized, sha256.lower(), source_provider, self.utc_now_iso()),
+            )
+            conn.execute(
+                """
+                UPDATE samples
+                SET source_provider = COALESCE(source_provider, ?),
+                    source_url = COALESCE(NULLIF(source_url, ''), ?)
+                WHERE sha256 = ?
+                """,
+                (source_provider, normalized, sha256.lower()),
+            )
 
     def fetch_pending_hashes(self, limit: int = 10) -> list[dict[str, Any]]:
         """Hashes from ThreatIngestor not yet downloaded (oldest first)."""
@@ -258,6 +324,15 @@ class MalwareTracker:
                     feature_dim,
                 ),
             )
+            if source_url:
+                conn.execute(
+                    """
+                    INSERT OR IGNORE INTO sample_sources
+                    (source_url, sha256, source_provider, first_seen_at)
+                    VALUES (?, ?, ?, ?)
+                    """,
+                    (source_url, sha256.lower(), source_provider, acquired_at),
+                )
 
     def mark_corrupted(
         self,
