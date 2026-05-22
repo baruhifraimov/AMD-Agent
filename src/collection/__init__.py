@@ -5,7 +5,7 @@ from src.collection.context import (
     build_collection_context,
     current_collection_phase,
 )
-from src.collection.discovery_chain import discover_with_fallback
+from src.collection.discovery_chain import discover_active_malware_sources, discover_with_fallback
 from src.collection.factory import CollectionStrategyFactory
 
 __all__ = [
@@ -13,5 +13,6 @@ __all__ = [
     "CollectionStrategyFactory",
     "build_collection_context",
     "current_collection_phase",
+    "discover_active_malware_sources",
     "discover_with_fallback",
 ]

@@ -6,7 +6,7 @@ import logging
 
 import src.db.tracker as db
 from src.collection.context import CollectionContext, build_collection_context
-from src.config import MALWARE_FALLBACK_PROVIDERS, PE_FETCH_LIMIT
+from src.config import MALWARE_FALLBACK_PROVIDERS, PE_FETCH_LIMIT, malshare_enabled
 from src.tools.malwarebazaar_api import reset_mb_run_budget
 from src.sources.base import SampleCandidate
 from src.sources.registry import SourceRegistry, get_registry
@@ -64,6 +64,156 @@ def _append_fresh_candidates(
     return fresh, returned
 
 
+def _discover_source_candidates(
+    source_name: str,
+    *,
+    request_limit: int,
+    registry: SourceRegistry,
+    tracker: db.MalwareTracker,
+    cti_queries: list[str] | None = None,
+) -> tuple[str, list[SampleCandidate]]:
+    provider_name = source_name
+    if source_name == "dynamic_cti":
+        provider_name = "dynamic_cti"
+        from src.intel.collector import ThreatIntelCollector
+
+        return (
+            provider_name,
+            ThreatIntelCollector(tracker=tracker).web_discover(
+                request_limit,
+                queries=cti_queries or None,
+            ),
+        )
+
+    provider = registry.get(source_name)
+    provider_name = provider.name
+    return provider_name, provider.discover(request_limit)
+
+
+def discover_active_malware_sources(
+    source_names: list[str] | None = None,
+    *,
+    registry: SourceRegistry | None = None,
+    tracker: db.MalwareTracker | None = None,
+    ctx: CollectionContext | None = None,
+    limit: int | None = None,
+    cti_queries: list[str] | None = None,
+    stats: list[dict] | None = None,
+    existing_candidates: list[SampleCandidate] | None = None,
+) -> list[SampleCandidate]:
+    """Discover malware while reserving slots for enabled first-class APIs."""
+    reset_mb_run_budget()
+    registry = registry or get_registry()
+    tracker = tracker or db.get_tracker()
+    if ctx is None:
+        ctx = build_collection_context(tracker)
+    fetch_limit = limit or PE_FETCH_LIMIT
+    requested_sources = list(dict.fromkeys(source_names or ["malwarebazaar"]))
+    available = set(registry.list_names())
+
+    if not malshare_enabled() or "malshare" not in available:
+        return discover_with_fallback(
+            requested_sources,
+            registry=registry,
+            tracker=tracker,
+            ctx=ctx,
+            expected_label=1,
+            limit=fetch_limit,
+            cti_queries=cti_queries,
+            stats=stats,
+        )
+
+    active_sources = ["malwarebazaar", "malshare"]
+    candidates: list[SampleCandidate] = []
+    seen = {
+        _candidate_key(candidate)
+        for candidate in (existing_candidates or [])
+        if _candidate_key(candidate)
+    }
+    slots = {
+        "malwarebazaar": (fetch_limit + 1) // 2,
+        "malshare": fetch_limit // 2,
+    }
+
+    for source_name in active_sources:
+        slot = slots[source_name]
+        if slot <= 0:
+            continue
+        provider_name = source_name
+        try:
+            provider_name, discovered = _discover_source_candidates(
+                source_name,
+                request_limit=max(slot * 5, 1),
+                registry=registry,
+                tracker=tracker,
+                cti_queries=cti_queries,
+            )
+        except Exception as exc:
+            logger.warning("Discovery failed for provider=%s: %s", provider_name, exc)
+            if stats is not None:
+                stats.append(
+                    {
+                        "stage": "active_malware_fill",
+                        "provider": provider_name,
+                        "discovered": 0,
+                        "fresh": 0,
+                        "returned": 0,
+                        "label": 1,
+                        "phase": ctx.phase,
+                        "error": str(exc),
+                    }
+                )
+            continue
+
+        fresh, returned = _append_fresh_candidates(
+            candidates,
+            discovered,
+            tracker=tracker,
+            seen=seen,
+            fetch_limit=len(candidates) + slot,
+        )
+        if stats is not None:
+            stats.append(
+                {
+                    "stage": "active_malware_fill",
+                    "provider": provider_name,
+                    "discovered": len(discovered),
+                    "fresh": fresh,
+                    "returned": returned,
+                    "label": 1,
+                    "phase": ctx.phase,
+                }
+            )
+
+    if len(candidates) < fetch_limit:
+        topup_stats: list[dict] = []
+        topup_sources = list(dict.fromkeys([*active_sources, *requested_sources]))
+        topup = discover_with_fallback(
+            topup_sources,
+            registry=registry,
+            tracker=tracker,
+            ctx=ctx,
+            expected_label=1,
+            limit=fetch_limit - len(candidates),
+            cti_queries=cti_queries,
+            stats=topup_stats,
+        )
+        _append_fresh_candidates(
+            candidates,
+            topup,
+            tracker=tracker,
+            seen=seen,
+            fetch_limit=fetch_limit,
+        )
+        if stats is not None:
+            for item in topup_stats:
+                topup_item = dict(item)
+                topup_item["stage"] = "active_malware_topup"
+                stats.append(topup_item)
+
+    return candidates[:fetch_limit]
+
+
 def discover_with_fallback(
     source_names: list[str],
     *,
@@ -101,18 +251,13 @@ def discover_with_fallback(
         request_limit = max(request_limit, 1)
         provider_name = source_name
         try:
-            if source_name == "dynamic_cti":
-                provider_name = "dynamic_cti"
-                from src.intel.collector import ThreatIntelCollector
-
-                discovered = ThreatIntelCollector(tracker=tracker).web_discover(
-                    request_limit,
-                    queries=cti_queries or None,
-                )
-            else:
-                provider = registry.get(source_name)
-                provider_name = provider.name
-                discovered = provider.discover(request_limit)
+            provider_name, discovered = _discover_source_candidates(
+                source_name,
+                request_limit=request_limit,
+                registry=registry,
+                tracker=tracker,
+                cti_queries=cti_queries,
+            )
         except Exception as exc:
             logger.warning("Discovery failed for provider=%s: %s", provider_name, exc)
             if stats is not None:

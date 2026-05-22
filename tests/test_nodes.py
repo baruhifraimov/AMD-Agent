@@ -201,6 +201,48 @@ def test_source_discovery_uses_selected_sources(mock_discover, tmp_paths):
     mock_discover.assert_called_once()
 
 
+@patch("src.nodes.source_discovery.discover_with_fallback")
+@patch("src.nodes.source_discovery.discover_active_malware_sources")
+def test_source_discovery_uses_active_malware_sources_for_bootstrap_malware(
+    mock_active,
+    mock_fallback,
+    tmp_paths,
+):
+    def discover_side_effect(*args, **kwargs):
+        kwargs["stats"].extend(
+            [
+                {
+                    "provider": "malwarebazaar",
+                    "discovered": 1,
+                    "fresh": 1,
+                    "returned": 1,
+                },
+                {
+                    "provider": "malshare",
+                    "discovered": 1,
+                    "fresh": 1,
+                    "returned": 1,
+                },
+            ]
+        )
+        return [
+            SampleCandidate("a" * 64, "malwarebazaar", 1, {"sha256": "a" * 64}),
+            SampleCandidate("b" * 64, "malshare", 1, {"sha256": "b" * 64}),
+        ]
+
+    mock_active.side_effect = discover_side_effect
+
+    out = source_discovery(AgentState(selected_sources=["malwarebazaar"], expected_label=1))
+
+    assert [c["provider"] for c in out["sample_candidates"]] == ["malwarebazaar", "malshare"]
+    assert [s["provider"] for s in out["bootstrap_metrics"]["discovery"]] == [
+        "malwarebazaar",
+        "malshare",
+    ]
+    mock_active.assert_called_once()
+    mock_fallback.assert_not_called()
+
+
 @patch("src.nodes.binary_fetch.download_pe_candidate")
 def test_binary_fetch_skips_known_sha_before_download(mock_download, tmp_paths, minimal_pe_path):
     sha = minimal_pe_path.sha256

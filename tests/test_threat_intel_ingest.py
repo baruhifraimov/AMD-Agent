@@ -1,6 +1,6 @@
 """Tests for threat intel ingest graph node."""
 
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from src.collection.context import CollectionContext
 from src.nodes.threat_intel_ingest import threat_intel_ingest
@@ -37,13 +37,38 @@ def _sample_candidate(sha: str, provider: str = "malwarebazaar") -> SampleCandid
     )
 
 
+def _active_registry(mb_candidates, malshare_candidates):
+    mb = MagicMock()
+    mb.name = "malwarebazaar"
+    mb.expected_label = 1
+    mb.discover.return_value = mb_candidates
+
+    malshare = MagicMock()
+    malshare.name = "malshare"
+    malshare.expected_label = 1
+    malshare.discover.return_value = malshare_candidates
+
+    registry = MagicMock()
+    registry.list_names.return_value = ["malwarebazaar", "malshare"]
+
+    def get(name):
+        if name == "malwarebazaar":
+            return mb
+        if name == "malshare":
+            return malshare
+        raise KeyError(name)
+
+    registry.get.side_effect = get
+    return registry, mb, malshare
+
+
 @patch("src.nodes.threat_intel_ingest.INTEL_INGEST_ENABLED", False)
 def test_ingest_empty_when_disabled():
     out = threat_intel_ingest(AgentState())
     assert out["sample_candidates"] == []
 
 
-@patch("src.nodes.threat_intel_ingest.discover_with_fallback", return_value=[])
+@patch("src.nodes.threat_intel_ingest.discover_active_malware_sources", return_value=[])
 @patch("src.nodes.threat_intel_ingest.build_collection_context", return_value=_steady_ctx())
 @patch("src.nodes.threat_intel_ingest.ThreatIntelCollector")
 def test_ingest_merges_threatingestor_and_native(mock_cls, _mock_ctx, mock_fill, tmp_paths):
@@ -76,7 +101,7 @@ def test_ingest_merges_threatingestor_and_native(mock_cls, _mock_ctx, mock_fill,
     assert len(merged) == 2
 
 
-@patch("src.nodes.threat_intel_ingest.discover_with_fallback", return_value=[])
+@patch("src.nodes.threat_intel_ingest.discover_active_malware_sources", return_value=[])
 @patch("src.nodes.threat_intel_ingest.build_collection_context", return_value=_steady_ctx())
 @patch("src.nodes.threat_intel_ingest.ThreatIntelCollector")
 def test_ingest_loads_pending_candidates(mock_cls, _mock_ctx, _mock_fill, tmp_paths):
@@ -110,7 +135,7 @@ def test_ingest_loads_pending_candidates(mock_cls, _mock_ctx, _mock_fill, tmp_pa
 @patch("src.nodes.threat_intel_ingest.PE_FETCH_LIMIT", 10)
 @patch("src.nodes.threat_intel_ingest.build_collection_context", return_value=_steady_ctx())
 @patch("src.nodes.threat_intel_ingest.ThreatIntelCollector")
-@patch("src.nodes.threat_intel_ingest.discover_with_fallback")
+@patch("src.nodes.threat_intel_ingest.discover_active_malware_sources")
 def test_ingest_volume_fill_completes_underfilled_cti_batch(
     mock_fill,
     mock_cls,
@@ -142,7 +167,44 @@ def test_ingest_volume_fill_completes_underfilled_cti_batch(
 @patch("src.nodes.threat_intel_ingest.PE_FETCH_LIMIT", 10)
 @patch("src.nodes.threat_intel_ingest.build_collection_context", return_value=_steady_ctx())
 @patch("src.nodes.threat_intel_ingest.ThreatIntelCollector")
-@patch("src.nodes.threat_intel_ingest.discover_with_fallback")
+@patch("src.collection.discovery_chain.get_registry")
+def test_ingest_volume_fill_queries_active_malshare(
+    mock_get_registry,
+    mock_cls,
+    _mock_ctx,
+    tmp_paths,
+    monkeypatch,
+):
+    monkeypatch.setenv("AMD_MALSHARE_ENABLED", "1")
+    registry, mb, malshare = _active_registry(
+        [_sample_candidate(f"{idx:064x}", "malwarebazaar") for idx in range(7, 9)],
+        [_sample_candidate(f"{idx:064x}", "malshare") for idx in range(9, 11)],
+    )
+    mock_get_registry.return_value = registry
+
+    mock_coll = mock_cls.return_value
+    mock_coll.sources.count_enabled.return_value = 1
+    mock_coll.seed_curated_sources.return_value = {"enabled": 1, "seeded": 0}
+    mock_coll.poll_threatingestor_artifacts.return_value = ([], {"candidates": 0})
+    mock_coll.poll_due_feeds.return_value = []
+    mock_coll.last_native_poll_stats = {}
+    mock_coll.pending_to_candidates.return_value = [
+        _pending_candidate(f"{idx:064x}") for idx in range(1, 7)
+    ]
+    mock_coll.sources.all_sources.return_value = []
+
+    out = threat_intel_ingest(AgentState())
+
+    assert len(out["sample_candidates"]) == 10
+    assert out["intel_poll_stats"]["volume_fill"]["sources"] == ["malwarebazaar", "malshare"]
+    mb.discover.assert_called_once_with(10)
+    malshare.discover.assert_called_once_with(10)
+
+
+@patch("src.nodes.threat_intel_ingest.PE_FETCH_LIMIT", 10)
+@patch("src.nodes.threat_intel_ingest.build_collection_context", return_value=_steady_ctx())
+@patch("src.nodes.threat_intel_ingest.ThreatIntelCollector")
+@patch("src.nodes.threat_intel_ingest.discover_active_malware_sources")
 def test_ingest_volume_fill_skipped_when_cti_batch_is_full(
     mock_fill,
     mock_cls,
@@ -171,7 +233,7 @@ def test_ingest_volume_fill_skipped_when_cti_batch_is_full(
 @patch("src.nodes.threat_intel_ingest.PE_FETCH_LIMIT", 10)
 @patch("src.nodes.threat_intel_ingest.build_collection_context", return_value=_steady_ctx())
 @patch("src.nodes.threat_intel_ingest.ThreatIntelCollector")
-@patch("src.nodes.threat_intel_ingest.discover_with_fallback")
+@patch("src.nodes.threat_intel_ingest.discover_active_malware_sources")
 def test_ingest_volume_fill_supplies_empty_cti_batch(
     mock_fill,
     mock_cls,

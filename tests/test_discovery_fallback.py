@@ -3,7 +3,7 @@
 from unittest.mock import MagicMock, patch
 
 from src.collection.context import CollectionContext
-from src.collection.discovery_chain import discover_with_fallback
+from src.collection.discovery_chain import discover_active_malware_sources, discover_with_fallback
 from src.sources.base import SampleCandidate
 
 
@@ -54,6 +54,122 @@ def _use_legacy_malware_fallback_chain(monkeypatch):
         "src.collection.discovery_chain.MALWARE_FALLBACK_PROVIDERS",
         ("threatfox", "twitter", "dynamic_cti"),
     )
+
+
+def _active_registry(mb_discover, ms_discover):
+    mb = MagicMock()
+    mb.name = "malwarebazaar"
+    mb.expected_label = 1
+    mb.discover.side_effect = mb_discover
+
+    ms = MagicMock()
+    ms.name = "malshare"
+    ms.expected_label = 1
+    ms.discover.side_effect = ms_discover
+
+    registry = MagicMock()
+    registry.list_names.return_value = ["malwarebazaar", "malshare"]
+
+    def get(name):
+        if name == "malwarebazaar":
+            return mb
+        if name == "malshare":
+            return ms
+        raise KeyError(name)
+
+    registry.get.side_effect = get
+    return registry, mb, ms
+
+
+def _tracker():
+    tracker = MagicMock()
+    tracker.is_downloaded.return_value = False
+    tracker.is_corrupted.return_value = False
+    tracker.is_pending.return_value = False
+    tracker.is_source_url_seen.return_value = False
+    return tracker
+
+
+def test_active_malware_sources_split_between_malwarebazaar_and_malshare(monkeypatch):
+    monkeypatch.setenv("MALWAREBAZAAR_AUTH_KEY", "test-key")
+    monkeypatch.setenv("AMD_MALSHARE_ENABLED", "1")
+    registry, mb, ms = _active_registry(
+        mb_discover=lambda _limit: [
+            _candidate("a", "malwarebazaar"),
+            _candidate("b", "malwarebazaar"),
+            _candidate("c", "malwarebazaar"),
+        ],
+        ms_discover=lambda _limit: [
+            _candidate("d", "malshare"),
+            _candidate("e", "malshare"),
+        ],
+    )
+    stats: list[dict] = []
+    ctx = CollectionContext(benign_count=0, malware_count=0, model_ready=False, pending_depth=0)
+
+    out = discover_active_malware_sources(
+        ["malwarebazaar"],
+        registry=registry,
+        tracker=_tracker(),
+        ctx=ctx,
+        limit=5,
+        stats=stats,
+    )
+
+    assert [candidate.provider for candidate in out] == [
+        "malwarebazaar",
+        "malwarebazaar",
+        "malwarebazaar",
+        "malshare",
+        "malshare",
+    ]
+    mb.discover.assert_called_once_with(15)
+    ms.discover.assert_called_once_with(10)
+    assert [item["provider"] for item in stats[:2]] == ["malwarebazaar", "malshare"]
+
+
+@patch("src.collection.discovery_chain.discover_with_fallback")
+def test_active_malware_sources_disabled_uses_existing_chain(mock_discover, monkeypatch):
+    monkeypatch.setenv("MALWAREBAZAAR_AUTH_KEY", "test-key")
+    monkeypatch.setenv("AMD_MALSHARE_ENABLED", "0")
+    mock_discover.return_value = [_candidate("a", "malwarebazaar")]
+    registry, _mb, _ms = _active_registry(lambda _limit: [], lambda _limit: [])
+    ctx = CollectionContext(benign_count=0, malware_count=0, model_ready=False, pending_depth=0)
+
+    out = discover_active_malware_sources(
+        ["malwarebazaar"],
+        registry=registry,
+        tracker=_tracker(),
+        ctx=ctx,
+        limit=5,
+    )
+
+    assert len(out) == 1
+    mock_discover.assert_called_once()
+    assert mock_discover.call_args.args[0] == ["malwarebazaar"]
+
+
+def test_active_malware_sources_deduplicates_malshare_overlap(monkeypatch):
+    monkeypatch.setenv("MALWAREBAZAAR_AUTH_KEY", "test-key")
+    monkeypatch.setenv("AMD_MALSHARE_ENABLED", "1")
+    same = SampleCandidate("a" * 64, "malwarebazaar", 1, {"sha256": "a" * 64})
+    overlap = SampleCandidate("a" * 64, "malshare", 1, {"sha256": "a" * 64})
+    registry, _mb, _ms = _active_registry(
+        mb_discover=lambda _limit: [same],
+        ms_discover=lambda _limit: [overlap],
+    )
+    ctx = CollectionContext(benign_count=0, malware_count=0, model_ready=False, pending_depth=0)
+
+    out = discover_active_malware_sources(
+        ["malwarebazaar"],
+        registry=registry,
+        tracker=_tracker(),
+        ctx=ctx,
+        limit=2,
+    )
+
+    assert len(out) == 1
+    assert out[0].provider == "malwarebazaar"
 
 
 @patch("src.intel.collector.ThreatIntelCollector")

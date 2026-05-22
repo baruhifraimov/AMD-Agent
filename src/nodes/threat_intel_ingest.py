@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 
 import src.db.tracker as db
-from src.collection import discover_with_fallback
+from src.collection import discover_active_malware_sources
 from src.collection.context import build_collection_context
 from src.config import (
     INTEL_INGEST_ENABLED,
@@ -14,6 +14,7 @@ from src.config import (
     PE_FETCH_LIMIT,
 )
 from src.intel.collector import ThreatIntelCollector
+from src.sources.base import SampleCandidate
 from src.state import AgentState
 from src.tools.malwarebazaar_api import reset_mb_run_budget
 
@@ -36,37 +37,47 @@ def _bootstrap_aggressive(tracker: db.MalwareTracker) -> bool:
     return int(counts.get(1, 0)) < MIN_TRAIN_MALWARE
 
 
-def _fill_with_malwarebazaar_volume(
+def _fill_with_active_malware_volume(
     candidates: list[dict],
     *,
     tracker: db.MalwareTracker,
     stats: dict,
 ) -> list[dict]:
-    """Fill an under-sized CTI batch with direct MalwareBazaar PE candidates."""
+    """Fill an under-sized CTI batch with active malware API candidates."""
     remaining = max(0, PE_FETCH_LIMIT - len(candidates))
     fill_stats: list[dict] = []
     stats["volume_fill"] = {
         "requested": remaining,
         "returned": 0,
+        "sources": [],
         "discovery": fill_stats,
     }
     if remaining <= 0:
         return candidates
 
-    discovered = discover_with_fallback(
+    existing = [SampleCandidate.from_dict(candidate) for candidate in candidates]
+    discovered = discover_active_malware_sources(
         ["malwarebazaar"],
         tracker=tracker,
-        expected_label=1,
         limit=remaining,
         stats=fill_stats,
+        existing_candidates=existing,
     )
     direct_candidates = [candidate.to_dict() for candidate in discovered]
     stats["volume_fill"]["returned"] = len(direct_candidates)
+    stats["volume_fill"]["sources"] = list(
+        dict.fromkeys(
+            str(item.get("provider", ""))
+            for item in fill_stats
+            if item.get("stage") == "active_malware_fill" and item.get("provider")
+        )
+    )
     if direct_candidates:
         logger.info(
-            "MalwareBazaar volume fill: requested=%d returned=%d",
+            "Active malware volume fill: requested=%d returned=%d sources=%s",
             remaining,
             len(direct_candidates),
+            ",".join(stats["volume_fill"]["sources"]),
         )
     return [*candidates, *direct_candidates]
 
@@ -163,7 +174,7 @@ def threat_intel_ingest(state: AgentState) -> dict:
                     if item.get("discovery_source") == "intel_threatingestor":
                         meta["discovery_source"] = "intel_threatingestor"
                     cand["metadata"] = meta
-    candidates = _fill_with_malwarebazaar_volume(
+    candidates = _fill_with_active_malware_volume(
         candidates,
         tracker=tracker,
         stats=stats,

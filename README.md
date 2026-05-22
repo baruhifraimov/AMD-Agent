@@ -52,6 +52,7 @@ are treated as stale and retrained.
 
 - MalShare API (optional, `AMD_MALSHARE_ENABLED=1`):
   - `PE32` hash listing and `getfile` download,
+  - active malware collection alongside MalwareBazaar during bootstrap and steady volume fill,
   - fallback when MalwareBazaar circuit/quota blocks (`AMD_MB_FALLBACK_MALSHARE=1`).
 
 - Dynamic CTI discovery:
@@ -204,7 +205,7 @@ Other useful variables:
 | `AMD_OLLAMA_SOURCE_SELECTION` | bind intel `@tool`s for Ollama source selection |
 | `AMD_CTI_DOWNLOAD_ALLOWLIST` | comma-separated hosts allowed for direct PE URL fallback |
 | `AMD_PE_FETCH_LIMIT` | max candidates returned per discovery pass (default `10`) |
-| `AMD_MALWARE_FALLBACK_PROVIDERS` | malware fallback chain after primary discovery, e.g. `threatfox,dynamic_cti` |
+| `AMD_MALWARE_FALLBACK_PROVIDERS` | malware fallback chain after active MalwareBazaar/MalShare discovery, e.g. `malshare,threatfox,dynamic_cti` |
 | `AMD_FALLBACK_PE_CHECK_MULT` | max PE-validation checks per requested fallback candidate multiplier (default `1`) |
 | `AMD_PE_DOWNLOAD_MAX_BYTES` | max bytes for allowlisted direct downloads |
 | `AMD_CAPA_RULES_DIR` | capa rules directory passed with `-r` |
@@ -454,7 +455,7 @@ Before leaving the stack running continuously:
 
 1. `python scripts/preflight_check.py` — phase, per-class trainable counts, bundle ready, pending depth.
 2. `docker compose up` — logs show `bootstrap skipped` or bootstrap complete, then `Scheduler started`.
-3. Steady malware passes hit `ThreatIntelIngest` first; empty queue falls back to `SourceDiscovery`.
+3. Steady malware passes hit `ThreatIntelIngest` first; underfilled CTI batches are topped up by active MalwareBazaar/MalShare discovery.
 4. `threatingestor` sidecar logs `AMD_COLLECTION_PHASE=steady` (not bootstrap skip loop).
 5. After new samples extract features, ADWIN updates use `AMD_ADWIN_DELTA` (tune if single-file retrains are too frequent).
 
