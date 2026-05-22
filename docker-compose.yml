@@ -12,6 +12,7 @@ services:
     volumes:
       - ./src:/app/src:ro
       - ./scripts:/app/scripts:ro
+      - ./tests:/app/tests:ro
       - ./data:/data
       - ./data/benign:/data/benign:ro
     cap_add:
