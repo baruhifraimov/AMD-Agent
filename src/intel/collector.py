@@ -44,7 +44,6 @@ class ThreatIntelCollector:
     ) -> None:
         self.tracker = tracker or db.get_tracker()
         self.sources = source_store or get_intel_source_store(self.tracker.db_path)
-        self._pe_hash_cache: dict[str, bool] = {}
         self.last_native_poll_stats: dict[str, Any] = {}
 
     def seed_curated_sources(self) -> dict[str, Any]:
@@ -495,19 +494,15 @@ class ThreatIntelCollector:
         return result
 
     def _is_pe_hash_cached(self, sha: str) -> bool:
-        if sha in self._pe_hash_cache:
-            return self._pe_hash_cache[sha]
         if not mb.malwarebazaar_available():
             raise mb.MalwareBazaarUnavailable("MalwareBazaar circuit is open")
         try:
-            ok = mb.is_pe_hash(sha)
+            return mb.is_pe_hash(sha)
         except mb.MalwareBazaarUnavailable:
             raise
         except Exception as exc:
             logger.info("MB is_pe_hash failed for %s: %s", sha, exc)
-            ok = False
-        self._pe_hash_cache[sha] = ok
-        return ok
+            return False
 
     def _bootstrap_mode(self) -> bool:
         counts = self.tracker.count_by_label()

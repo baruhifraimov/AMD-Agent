@@ -207,8 +207,15 @@ Other useful variables:
 | `AMD_OPTUNA_TIMEOUT` | Optuna tuning timeout in seconds (default `300`) |
 | `AMD_EVAL_EVERY_RUNS` | run periodic TESSERACT eval every N steady-state graph passes (default `10`) |
 | `AMD_EVAL_SKIP_BOOTSTRAP` | skip periodic TESSERACT eval during bootstrap (default `1`) |
+| `AMD_MB_MIN_REQUEST_INTERVAL` | minimum seconds between MalwareBazaar POST requests (default `1.5`) |
+| `AMD_MB_USER_AGENT` | custom User-Agent for MB API (default identifies AMD-Agent research use) |
+| `AMD_MB_USER_AGENT_CONTACT` | optional contact string appended to User-Agent |
+| `AMD_MB_INFO_CACHE_TTL_DAYS` | SQLite cache TTL for `get_info` / PE verdict lookups (default `30`) |
+| `AMD_MB_DAILY_DOWNLOAD_LIMIT` | max `get_file` downloads per UTC day per IP (default `1900`, under abuse.ch 2000 cap) |
+| `AMD_MB_MAX_INFO_CALLS_PER_RUN` | max `get_info` calls per graph run (`0` = unlimited) |
 | `AMD_MB_CIRCUIT_FAILURE_THRESHOLD` | consecutive MB 5xx/transport failures before circuit opens (default `3`) |
-| `AMD_MB_CIRCUIT_OPEN_SECONDS` | seconds to skip MB API calls while circuit is open (default `120`) |
+| `AMD_MB_CIRCUIT_OPEN_SECONDS` | seconds to skip MB API calls while circuit is open after 5xx (default `120`) |
+| `AMD_MB_CIRCUIT_OPEN_SECONDS_429` | seconds to skip MB API after HTTP 429 backoff exhausted (default `3600`) |
 | `AMD_CTI_HOST_BLOCK_SECONDS_403` | block CTI host after HTTP 403 (default `900`) |
 | `AMD_CTI_HOST_BLOCK_SECONDS_429` | block CTI host after HTTP 429 (default `3600`) |
 | `AMD_CTI_HOST_BLOCK_SECONDS_TRANSPORT` | block CTI host after connection errors (default `300`) |

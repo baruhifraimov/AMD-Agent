@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterator
 
+from src import config
 from src.config import DB_PATH, FEATURE_DIM, FEATURE_SET_VERSION, ensure_dirs
 
 _SCHEMA = """
@@ -32,6 +33,16 @@ CREATE INDEX IF NOT EXISTS idx_samples_acquired ON samples(acquired_at);
 CREATE INDEX IF NOT EXISTS idx_samples_status ON samples(status);
 CREATE INDEX IF NOT EXISTS idx_samples_source_url ON samples(source_url);
 CREATE INDEX IF NOT EXISTS idx_samples_feature_version ON samples(feature_version);
+CREATE TABLE IF NOT EXISTS mb_hash_cache (
+    sha256 TEXT PRIMARY KEY,
+    is_pe INTEGER NOT NULL,
+    cached_at TEXT NOT NULL,
+    query_status TEXT
+);
+CREATE TABLE IF NOT EXISTS mb_api_usage (
+    usage_date TEXT PRIMARY KEY,
+    get_file_count INTEGER NOT NULL DEFAULT 0
+);
 """
 
 
@@ -375,3 +386,91 @@ class MalwareTracker:
     @staticmethod
     def utc_now_iso() -> str:
         return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+
+    @staticmethod
+    def utc_today() -> str:
+        return datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+    def get_mb_pe_verdict(self, sha256: str) -> bool | None:
+        """Return cached PE verdict, or None on miss or expired entry."""
+        key = sha256.lower()
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT is_pe, cached_at FROM mb_hash_cache WHERE sha256 = ?",
+                (key,),
+            ).fetchone()
+        if not row:
+            return None
+        cached_at = row["cached_at"]
+        try:
+            cached_dt = datetime.strptime(cached_at, "%Y-%m-%d %H:%M:%S").replace(
+                tzinfo=timezone.utc
+            )
+        except ValueError:
+            return None
+        age_days = (datetime.now(timezone.utc) - cached_dt).total_seconds() / 86400
+        if age_days > config.MB_INFO_CACHE_TTL_DAYS:
+            return None
+        return bool(row["is_pe"])
+
+    def set_mb_pe_verdict(
+        self,
+        sha256: str,
+        is_pe: bool,
+        *,
+        query_status: str = "ok",
+    ) -> None:
+        key = sha256.lower()
+        now = self.utc_now_iso()
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO mb_hash_cache (sha256, is_pe, cached_at, query_status)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(sha256) DO UPDATE SET
+                    is_pe = excluded.is_pe,
+                    cached_at = excluded.cached_at,
+                    query_status = excluded.query_status
+                """,
+                (key, int(is_pe), now, query_status),
+            )
+
+    def _mb_download_count(self, conn: sqlite3.Connection, day: str) -> int:
+        conn.execute(
+            """
+            INSERT INTO mb_api_usage (usage_date, get_file_count)
+            VALUES (?, 0)
+            ON CONFLICT(usage_date) DO NOTHING
+            """,
+            (day,),
+        )
+        row = conn.execute(
+            "SELECT get_file_count FROM mb_api_usage WHERE usage_date = ?",
+            (day,),
+        ).fetchone()
+        return int(row["get_file_count"]) if row else 0
+
+    def mb_download_quota_available(self, *, limit: int | None = None) -> bool:
+        """Return True if another get_file download is allowed today."""
+        cap = limit if limit is not None else config.MB_DAILY_DOWNLOAD_LIMIT
+        day = self.utc_today()
+        with self._connect() as conn:
+            count = self._mb_download_count(conn, day)
+        return count < cap
+
+    def record_mb_download(self) -> bool:
+        """Increment daily get_file counter after a successful download."""
+        cap = config.MB_DAILY_DOWNLOAD_LIMIT
+        day = self.utc_today()
+        with self._connect() as conn:
+            self._mb_download_count(conn, day)
+            conn.execute(
+                """
+                UPDATE mb_api_usage
+                SET get_file_count = get_file_count + 1
+                WHERE usage_date = ? AND get_file_count < ?
+                """,
+                (day, cap),
+            )
+            updated = conn.execute("SELECT changes()").fetchone()
+        return bool(updated and int(updated[0]) > 0)

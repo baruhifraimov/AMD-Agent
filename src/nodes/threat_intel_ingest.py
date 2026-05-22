@@ -14,6 +14,7 @@ from src.config import (
 )
 from src.intel.collector import ThreatIntelCollector
 from src.state import AgentState
+from src.tools.malwarebazaar import reset_mb_run_budget
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +37,7 @@ def _bootstrap_aggressive(tracker: db.MalwareTracker) -> bool:
 
 def threat_intel_ingest(state: AgentState) -> dict:
     """Run discover/poll/validate and load pending candidates into graph state."""
+    reset_mb_run_budget()
     if not INTEL_INGEST_ENABLED:
         return {"sample_candidates": []}
 
