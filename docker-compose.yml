@@ -33,7 +33,6 @@ services:
     volumes:
       - ./src:/app/src:ro
       - ./scripts:/app/scripts:ro
-      - ./docker:/app/docker:ro
       - ./threatingestor_config.yml:/app/threatingestor_config.yml:ro
       - ./data:/data
     cap_add:

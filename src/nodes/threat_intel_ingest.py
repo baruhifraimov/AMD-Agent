@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 
 import src.db.tracker as db
+from src.collection import discover_with_fallback
 from src.collection.context import build_collection_context
 from src.config import (
     INTEL_INGEST_ENABLED,
@@ -33,6 +34,41 @@ def _should_poll(tracker: db.MalwareTracker) -> bool:
 def _bootstrap_aggressive(tracker: db.MalwareTracker) -> bool:
     counts = tracker.count_by_label()
     return int(counts.get(1, 0)) < MIN_TRAIN_MALWARE
+
+
+def _fill_with_malwarebazaar_volume(
+    candidates: list[dict],
+    *,
+    tracker: db.MalwareTracker,
+    stats: dict,
+) -> list[dict]:
+    """Fill an under-sized CTI batch with direct MalwareBazaar PE candidates."""
+    remaining = max(0, PE_FETCH_LIMIT - len(candidates))
+    fill_stats: list[dict] = []
+    stats["volume_fill"] = {
+        "requested": remaining,
+        "returned": 0,
+        "discovery": fill_stats,
+    }
+    if remaining <= 0:
+        return candidates
+
+    discovered = discover_with_fallback(
+        ["malwarebazaar"],
+        tracker=tracker,
+        expected_label=1,
+        limit=remaining,
+        stats=fill_stats,
+    )
+    direct_candidates = [candidate.to_dict() for candidate in discovered]
+    stats["volume_fill"]["returned"] = len(direct_candidates)
+    if direct_candidates:
+        logger.info(
+            "MalwareBazaar volume fill: requested=%d returned=%d",
+            remaining,
+            len(direct_candidates),
+        )
+    return [*candidates, *direct_candidates]
 
 
 def threat_intel_ingest(state: AgentState) -> dict:
@@ -127,6 +163,11 @@ def threat_intel_ingest(state: AgentState) -> dict:
                     if item.get("discovery_source") == "intel_threatingestor":
                         meta["discovery_source"] = "intel_threatingestor"
                     cand["metadata"] = meta
+    candidates = _fill_with_malwarebazaar_volume(
+        candidates,
+        tracker=tracker,
+        stats=stats,
+    )
 
     sources_polled = [s.get("url", "") for s in collector.sources.all_sources()[:10]]
 
