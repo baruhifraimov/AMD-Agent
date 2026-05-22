@@ -7,6 +7,7 @@ import logging
 import src.db.tracker as db
 from src.collection.context import CollectionContext, build_collection_context
 from src.config import MALWARE_FALLBACK_PROVIDERS, PE_FETCH_LIMIT
+from src.tools.malwarebazaar import reset_mb_run_budget
 from src.sources.base import SampleCandidate
 from src.sources.registry import SourceRegistry, get_registry
 
@@ -75,6 +76,7 @@ def discover_with_fallback(
     stats: list[dict] | None = None,
 ) -> list[SampleCandidate]:
     """Discover from providers and keep filling malware batches via fallbacks."""
+    reset_mb_run_budget()
     registry = registry or get_registry()
     tracker = tracker or db.get_tracker()
     if ctx is None:

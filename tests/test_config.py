@@ -25,6 +25,16 @@ def test_malware_fallback_providers_env(monkeypatch):
         importlib.reload(config)
 
 
+def test_mb_min_request_interval_env(monkeypatch):
+    monkeypatch.setenv("AMD_MB_MIN_REQUEST_INTERVAL", "2.5")
+    reloaded = importlib.reload(config)
+    try:
+        assert reloaded.MB_MIN_REQUEST_INTERVAL == 2.5
+    finally:
+        monkeypatch.delenv("AMD_MB_MIN_REQUEST_INTERVAL", raising=False)
+        importlib.reload(config)
+
+
 def test_fallback_pe_check_mult_env(monkeypatch):
     monkeypatch.setenv("AMD_FALLBACK_PE_CHECK_MULT", "2")
     reloaded = importlib.reload(config)
