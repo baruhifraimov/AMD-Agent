@@ -11,6 +11,7 @@ services:
       AMD_CAPA_RULES_DIR: "/opt/capa-rules"
     volumes:
       - ./src:/app/src:ro
+      - ./scripts:/app/scripts:ro
       - ./data:/data
       - ./data/benign:/data/benign:ro
     cap_add:
@@ -30,6 +31,9 @@ services:
     environment:
       AMD_AGENT_CONTAINER: "1"
     volumes:
+      - ./src:/app/src:ro
+      - ./scripts:/app/scripts:ro
+      - ./docker:/app/docker:ro
       - ./threatingestor_config.yml:/app/threatingestor_config.yml:ro
       - ./data:/data
     cap_add:
