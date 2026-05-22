@@ -67,11 +67,13 @@ def test_route_after_intel_ingest():
 @patch("src.nodes.binary_fetch.download_pe_candidate")
 @patch("src.nodes.threat_intel_ingest.ThreatIntelCollector")
 @patch("src.graph.source_selector")
+@patch("src.nodes.threat_intel_ingest.discover_with_fallback", return_value=[])
 @patch("src.nodes.source_discovery.discover_with_fallback", return_value=[])
 @patch("src.nodes.feature_extraction.extract_pe_features_with_error")
 def test_graph_malware_pending_queue_path(
     mock_feats,
     mock_discover,
+    mock_ti_discover,
     mock_selector,
     mock_intel_coll,
     mock_download,
@@ -120,8 +122,20 @@ def test_graph_malware_pending_queue_path(
 
     mock_coll = mock_intel_coll.return_value
     mock_coll.sources.count_enabled.return_value = 1
+    mock_coll.seed_curated_sources.return_value = {"enabled": 1, "seeded": 0}
     mock_coll.poll_threatingestor_artifacts.return_value = ([], {})
     mock_coll.poll_due_feeds.return_value = []
+    mock_coll.last_native_poll_stats = {
+        "sources_due": 0,
+        "sources_polled": 0,
+        "entries": 0,
+        "pages_fetched": 0,
+        "raw_hashes": 0,
+        "raw_pe_urls": 0,
+        "returned": 0,
+        "sources_disabled": 0,
+        "source_urls": [],
+    }
     mock_coll.validate_and_queue.return_value = {"queued": 0}
     mock_coll.sources.all_sources.return_value = []
     mock_coll.pending_to_candidates.return_value = [
@@ -168,6 +182,7 @@ def test_graph_malware_pending_queue_path(
     assert final.source_type == "malwarebazaar"
     assert sha in final.discovered_hashes or len(final.feature_vectors) >= 0
     assert tracker.is_downloaded(sha)
+    mock_ti_discover.assert_called_once()
     mock_tesseract.assert_called_once()
 
 

@@ -49,8 +49,18 @@ def _make_registry(mb_discover, tf_discover=None, tw_discover=None):
     return registry, mb, tf, tw
 
 
+def _use_legacy_malware_fallback_chain(monkeypatch):
+    monkeypatch.setattr(
+        "src.collection.discovery_chain.MALWARE_FALLBACK_PROVIDERS",
+        ("threatfox", "twitter", "dynamic_cti"),
+    )
+
+
 @patch("src.intel.collector.ThreatIntelCollector")
-def test_malwarebazaar_empty_continues_fallbacks_until_limit(mock_coll_cls):
+def test_malwarebazaar_empty_continues_fallbacks_until_limit(
+    mock_coll_cls, monkeypatch
+):
+    _use_legacy_malware_fallback_chain(monkeypatch)
     sha = "x" * 64
     mock_coll_cls.return_value.web_discover.return_value = []
     registry, mb, tf, tw = _make_registry(
@@ -105,7 +115,10 @@ def test_malwarebazaar_full_batch_does_not_call_fallbacks(mock_coll_cls):
 
 
 @patch("src.intel.collector.ThreatIntelCollector")
-def test_partial_batches_fill_from_fallbacks_before_dynamic_cti(mock_coll_cls):
+def test_partial_batches_fill_from_fallbacks_before_dynamic_cti(
+    mock_coll_cls, monkeypatch
+):
+    _use_legacy_malware_fallback_chain(monkeypatch)
     registry, _mb, _tf, tw = _make_registry(
         mb_discover=lambda _limit: [_candidate("a", "malwarebazaar")],
         tf_discover=lambda _limit: [
@@ -144,7 +157,10 @@ def test_partial_batches_fill_from_fallbacks_before_dynamic_cti(mock_coll_cls):
 
 
 @patch("src.intel.collector.ThreatIntelCollector")
-def test_malwarebazaar_empty_uses_twitter_before_dynamic_cti(mock_coll_cls):
+def test_malwarebazaar_empty_uses_twitter_before_dynamic_cti(
+    mock_coll_cls, monkeypatch
+):
+    _use_legacy_malware_fallback_chain(monkeypatch)
     sha = "t" * 64
     mock_coll_cls.return_value.web_discover.return_value = []
     registry, _mb, _tf, tw = _make_registry(
@@ -173,7 +189,10 @@ def test_malwarebazaar_empty_uses_twitter_before_dynamic_cti(mock_coll_cls):
 
 
 @patch("src.intel.collector.ThreatIntelCollector")
-def test_malwarebazaar_empty_falls_back_to_dynamic_cti_when_all_providers_empty(mock_coll_cls):
+def test_malwarebazaar_empty_falls_back_to_dynamic_cti_when_all_providers_empty(
+    mock_coll_cls, monkeypatch
+):
+    _use_legacy_malware_fallback_chain(monkeypatch)
     registry, _mb, _tf, _tw = _make_registry(
         mb_discover=lambda _limit: [],
         tf_discover=lambda _limit: [],
@@ -205,7 +224,8 @@ def test_malwarebazaar_empty_falls_back_to_dynamic_cti_when_all_providers_empty(
 
 
 @patch("src.intel.collector.ThreatIntelCollector")
-def test_steady_phase_also_falls_back_to_ddg(mock_coll_cls):
+def test_steady_phase_also_falls_back_to_ddg(mock_coll_cls, monkeypatch):
+    _use_legacy_malware_fallback_chain(monkeypatch)
     registry, _mb, _tf, _tw = _make_registry(
         mb_discover=lambda _limit: [],
         tf_discover=lambda _limit: [],
@@ -267,7 +287,8 @@ def test_configured_fallback_chain_can_skip_low_yield_providers(mock_coll_cls, m
 
 
 @patch("src.intel.collector.ThreatIntelCollector")
-def test_dynamic_cti_fallback_when_ctx_none(mock_coll_cls):
+def test_dynamic_cti_fallback_when_ctx_none(mock_coll_cls, monkeypatch):
+    _use_legacy_malware_fallback_chain(monkeypatch)
     registry, _mb, _tf, _tw = _make_registry(
         mb_discover=lambda _limit: [],
         tf_discover=lambda _limit: [],
