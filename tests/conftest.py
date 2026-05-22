@@ -56,7 +56,7 @@ def tmp_paths(tmp_path, monkeypatch):
         return tracker if db_path is None else MalwareTracker(db_path)
 
     monkeypatch.setattr("src.db.tracker.get_tracker", _get_tracker)
-    monkeypatch.setattr("src.tools.malwarebazaar.get_tracker", _get_tracker)
+    monkeypatch.setattr("src.tools.clients.malwarebazaar_api_client.get_tracker", _get_tracker)
     return {"db": db, "model": model, "adwin": adwin, "sandbox": sandbox, "benign": benign, "tracker": tracker}
 
 

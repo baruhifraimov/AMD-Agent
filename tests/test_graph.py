@@ -6,6 +6,7 @@ from src.graph import (
     build_graph,
     route_after_drift,
     route_after_intel_ingest,
+    route_after_pe_discovery,
     route_after_selector,
 )
 from src.sources.base import SampleCandidate
@@ -54,11 +55,57 @@ def test_route_after_selector(mock_ctx):
     ) == "source_discovery"
 
 
+@patch("src.graph.pe_source_discovery_enabled", return_value=False)
+def test_route_after_selector_pe_discovery_disabled(_mock_pe):
+    from src.collection.context import CollectionContext
+
+    with patch("src.graph.build_collection_context") as mock_ctx:
+        mock_ctx.return_value = CollectionContext(
+            benign_count=100, malware_count=100, model_ready=True, pending_depth=0
+        )
+        assert (
+            route_after_selector(
+                AgentState(
+                    expected_label=1,
+                    route_hint="threat_intel_ingest",
+                    need_new_sources=True,
+                )
+            )
+            == "threat_intel_ingest"
+        )
+
+
+@patch("src.graph.pe_source_discovery_enabled", return_value=True)
+@patch("src.graph.PESourceStore")
+def test_route_pe_source_discovery_when_sparse(mock_store, _mock_enabled):
+    mock_store.return_value.count_active.return_value = 0
+    with patch("src.graph.build_collection_context") as mock_ctx:
+        from src.collection.context import CollectionContext
+
+        mock_ctx.return_value = CollectionContext(
+            benign_count=100, malware_count=100, model_ready=True, pending_depth=0
+        )
+        assert (
+            route_after_selector(
+                AgentState(expected_label=1, collection_phase="steady")
+            )
+            == "pe_source_discovery"
+        )
+
+
+def test_route_after_pe_discovery():
+    assert route_after_pe_discovery(
+        AgentState(route_hint="threat_intel_ingest")
+    ) == "threat_intel_ingest"
+    assert route_after_pe_discovery(AgentState()) == "source_discovery"
+
+
 def test_route_after_intel_ingest():
     assert route_after_intel_ingest(AgentState(sample_candidates=[])) == "source_discovery"
     assert route_after_intel_ingest(AgentState(sample_candidates=[{"x": 1}])) == "binary_fetch"
 
 
+@patch("src.graph._CHECKPOINTER", None)
 @patch("src.nodes.evaluation_node.EVAL_EVERY_RUNS", 1)
 @patch("src.evaluation.tesseract.run_tesseract_eval", return_value={})
 @patch("src.evaluation.tesseract.plot_performance_decay")

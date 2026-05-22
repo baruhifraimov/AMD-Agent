@@ -6,7 +6,7 @@ import httpx
 import pytest
 
 from src.tools.fetch import save_pe_to_sandbox
-from src.tools.malwarebazaar import get_file_type, get_recent_pe, is_pe_sample, download_sample
+from src.tools.malwarebazaar_api import get_file_type, get_recent_pe, is_pe_sample, download_sample
 from src.tools.validate import file_sha256, is_duplicate, is_pe_mz, is_pe_signature
 from src.db.tracker import MalwareTracker
 

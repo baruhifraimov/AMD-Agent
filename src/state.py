@@ -37,3 +37,4 @@ class AgentState(BaseModel):
     drift_stats: Dict[str, float] = Field(default_factory=dict)
     drift_pre_metrics: Dict[str, float] = Field(default_factory=dict)
     pending_drift_log: bool = False
+    need_new_sources: bool = False

@@ -48,5 +48,6 @@ def drift_monitor(state: AgentState) -> dict:
 
         out["drift_pre_metrics"] = latest_eval_metrics()
         out["pending_drift_log"] = True
+        out["need_new_sources"] = True
 
     return out

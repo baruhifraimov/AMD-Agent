@@ -8,12 +8,14 @@ from src.nodes.evaluation_node import evaluation_node
 from src.nodes.explain_drift_context import explain_drift_context
 from src.nodes.feature_extraction import feature_extraction
 from src.nodes.model_retrain import model_retrain
+from src.nodes.pe_source_discovery import pe_source_discovery
 from src.nodes.source_discovery import source_discovery
 from src.nodes.source_selector import source_selector
 from src.nodes.threat_intel_ingest import threat_intel_ingest
 
 __all__ = [
     "source_selector",
+    "pe_source_discovery",
     "threat_intel_ingest",
     "source_discovery",
     "binary_fetch",
