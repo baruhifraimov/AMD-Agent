@@ -12,7 +12,7 @@ import logging
 from typing import Any
 
 import src.db.tracker as db
-from src.config import OTX_API_KEY, OTX_ENABLED, OTX_PULSE_DAYS, OTX_PULSE_LIMIT
+from src.config import OTX_API_KEY, OTX_ENABLED, OTX_PULSE_DAYS, OTX_PULSE_LIMIT, OTX_PULSE_MAX_HASHES
 from src.llm import semantic_filter_hashes
 from src.sources.base import PESourceProvider, SampleCandidate
 from src.tools import malwarebazaar_api as mb
@@ -44,9 +44,14 @@ class OTXPulseCTIProvider(PESourceProvider):
 
         evidence: list[dict[str, Any]] = []
         seen_hashes: set[str] = set()
+        max_hashes = OTX_PULSE_MAX_HASHES
         for pulse in pulses:
+            if len(evidence) >= max_hashes:
+                break
             raw_text = pulse.get("raw_text", "")
             for sha in pulse.get("sha256_hashes", []):
+                if len(evidence) >= max_hashes:
+                    break
                 if sha in seen_hashes:
                     continue
                 seen_hashes.add(sha)
@@ -59,6 +64,8 @@ class OTXPulseCTIProvider(PESourceProvider):
         if not evidence:
             logger.info("OTX pulses contained no SHA256 file hash indicators")
             return []
+        logger.info("OTX collected %d unique hashes (cap %d) from %d pulse(s)",
+                     len(evidence), max_hashes, len(pulses))
 
         filtered = semantic_filter_hashes(evidence)
 

@@ -103,3 +103,23 @@ def test_otx_deduplicates_hashes_across_pulses(mock_filter, mock_is_pe, tmp_path
 
     evidence = mock_filter.call_args[0][0]
     assert len(evidence) == 1
+
+
+@patch("src.sources.otx_pulse_cti.mb.is_pe_hash", return_value=True)
+@patch("src.sources.otx_pulse_cti.semantic_filter_hashes")
+@patch("src.sources.otx_pulse_cti.OTX_API_KEY", "test-key")
+@patch("src.sources.otx_pulse_cti.OTX_ENABLED", True)
+@patch("src.sources.otx_pulse_cti.OTX_PULSE_MAX_HASHES", 3)
+def test_otx_caps_total_hashes_per_round(mock_filter, mock_is_pe, tmp_paths):
+    """Evidence sent to semantic filter never exceeds OTX_PULSE_MAX_HASHES."""
+    hashes = [f"{i:064x}" for i in range(10)]
+    mock_filter.return_value = [
+        {"sha256": hashes[0], "context": "malware", "semantic_reason": "ok"},
+    ]
+    pulse = {"sha256_hashes": hashes, "raw_text": "big campaign"}
+    with patch("src.tools.clients.otx_api_client.OTXApiClient") as mock_client_cls:
+        mock_client_cls.return_value.get_recent_pulses.return_value = [pulse]
+        OTXPulseCTIProvider().discover(limit=5)
+
+    evidence = mock_filter.call_args[0][0]
+    assert len(evidence) == 3

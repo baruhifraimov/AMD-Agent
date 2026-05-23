@@ -161,6 +161,7 @@ OTX_API_KEY = os.getenv("OTX_API_KEY", "").strip()
 OTX_ENABLED = True
 OTX_PULSE_DAYS = 30
 OTX_PULSE_LIMIT = 10
+OTX_PULSE_MAX_HASHES = 30
 
 # Explainability (local: edit CAPA_RULES_DIR for your capa-rules checkout)
 OLLAMA_TIMEOUT = 8.0
