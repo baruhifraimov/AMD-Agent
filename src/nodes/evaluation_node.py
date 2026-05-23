@@ -8,7 +8,13 @@ from typing import Any
 from src.collection.context import build_collection_context
 from src.config import EVAL_EVERY_RUNS, EVAL_SKIP_BOOTSTRAP, EVAL_STATE_PATH, ensure_dirs
 from src.evaluation.drift_log import append_drift_log, build_drift_record
-from src.log import PHASE_EVAL, get_logger, phase_log, task_status, vlog
+from src.evaluation.training_history import (
+    DELTA_METRIC_KEYS,
+    append_history,
+    compute_delta_pct,
+    read_last_history,
+)
+from src.log import PHASE_EVAL, PHASE_RETRAIN, get_logger, phase_log, task_status, vlog
 from src.ml.classifier import load_bundle, model_bundle_ready
 from src.state import AgentState
 
@@ -73,6 +79,79 @@ def _should_run_eval(state: AgentState) -> tuple[bool, int | None, str, str]:
     return False, run_count, phase, "interval"
 
 
+def _current_scalar_metrics(metrics: dict[str, Any]) -> dict[str, float]:
+    out: dict[str, float] = {}
+    for key in DELTA_METRIC_KEYS:
+        value = metrics.get(key)
+        if isinstance(value, (int, float)):
+            out[key] = float(value)
+    return out
+
+
+def _record_training_history(merged: dict[str, Any]) -> dict[str, Any]:
+    """Append per-retrain record to training_history.jsonl and log improvement summary."""
+    from datetime import datetime, timezone
+
+    current = _current_scalar_metrics(merged)
+    if not current:
+        return {}
+
+    previous_record = read_last_history()
+    previous = previous_record.get("metrics", {}) if previous_record else {}
+    delta_pct = compute_delta_pct(current, previous)
+    improved = delta_pct.get("accuracy", 0.0) >= 0.0
+
+    retrain_count = int(merged.get("retrain_count", 0) or 0)
+    trigger = str(merged.get("retrain_trigger") or "unknown")
+    model_version = str(merged.get("model_version") or "")
+    task_id = int(merged.get("task_id", 0) or 0)
+    sample_count = int(merged.get("new_batch_size", 0) or 0)
+
+    record = {
+        "retrain_count": retrain_count,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "trigger": trigger,
+        "model_version": model_version,
+        "task_id": task_id,
+        "sample_count": sample_count,
+        "metrics": current,
+        "previous": {k: float(v) for k, v in previous.items() if isinstance(v, (int, float))},
+        "delta_pct": delta_pct,
+        "improved": improved,
+    }
+    append_history(record)
+
+    prev_acc = float(previous.get("accuracy", 0.0)) if previous else 0.0
+    curr_acc = current.get("accuracy", 0.0)
+    pct = delta_pct.get("accuracy", 0.0)
+    sign = "+" if pct >= 0 else ""
+    label = "IMPROVED" if improved else "REGRESSION"
+    phase_log(
+        logger,
+        PHASE_RETRAIN,
+        "Retrain #%d [%s] | acc %.4f -> %.4f (%s%.2f%%) | %s",
+        retrain_count,
+        trigger,
+        prev_acc,
+        curr_acc,
+        sign,
+        pct,
+        label,
+    )
+    if not improved:
+        logger.warning(
+            "[%s] MODEL REGRESSION — new model worse than previous; review training_history.jsonl",
+            PHASE_RETRAIN,
+        )
+
+    return {
+        "retrain_count": retrain_count,
+        "previous_metrics": {k: float(v) for k, v in previous.items() if isinstance(v, (int, float))},
+        "delta_metrics": delta_pct,
+        "improved": improved,
+    }
+
+
 def evaluation_node(state: AgentState) -> dict:
     """Evaluate model performance and log artifacts for the final report."""
     should_run, run_count, phase, reason = _should_run_eval(state)
@@ -121,6 +200,13 @@ def evaluation_node(state: AgentState) -> dict:
         merged["evaluation_error"] = 1.0
 
     out: dict = {"evaluation_metrics": merged}
+
+    if metrics and merged.get("retrained") == 1.0:
+        try:
+            history_update = _record_training_history(merged)
+            out.update(history_update)
+        except Exception as exc:
+            logger.warning("[%s] Training history record failed; continuing: %s", PHASE_EVAL, exc)
 
     if state.pending_drift_log:
         try:

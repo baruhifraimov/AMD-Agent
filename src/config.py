@@ -21,6 +21,7 @@ if _in_container:
     EVAL_STATE_PATH = Path("/data/evaluation_state.json")
     DRIFT_LOG_PATH = Path("/data/drift_log.jsonl")
     MODEL_UPDATE_LOG_PATH = Path("/data/model_update_log.jsonl")
+    TRAINING_HISTORY_PATH = Path("/data/training_history.jsonl")
     LOG_PATH = Path("/data/logs/amd-agent.log")
     FIGURES_DIR = Path("/data/figures")
     REPOS_DIR = Path("/data/repos")
@@ -34,6 +35,7 @@ else:
     EVAL_STATE_PATH = PROJECT_ROOT / "data" / "evaluation_state.json"
     DRIFT_LOG_PATH = PROJECT_ROOT / "data" / "drift_log.jsonl"
     MODEL_UPDATE_LOG_PATH = PROJECT_ROOT / "data" / "model_update_log.jsonl"
+    TRAINING_HISTORY_PATH = PROJECT_ROOT / "data" / "training_history.jsonl"
     LOG_PATH = PROJECT_ROOT / "data" / "logs" / "amd-agent.log"
     FIGURES_DIR = PROJECT_ROOT / "report" / "figures"
     REPOS_DIR = PROJECT_ROOT / "data" / "repos"
@@ -359,6 +361,7 @@ def ensure_dirs() -> None:
         EVAL_STATE_PATH.parent,
         DRIFT_LOG_PATH.parent,
         MODEL_UPDATE_LOG_PATH.parent,
+        TRAINING_HISTORY_PATH.parent,
         LOG_PATH.parent,
         REPOS_DIR,
     ):
