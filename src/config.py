@@ -36,6 +36,7 @@ REPLAY_BUDGET = 3000
 MIN_TRAIN_MALWARE = 25
 MIN_TRAIN_BENIGN = 25
 PE_FETCH_LIMIT = 10
+THRESHOLD_RETRAIN_MIN_NEW_SAMPLES = 20  # retrain when N untrained featured samples accumulate
 TARGET_FPR = 0.001  # production ceiling (5k+ trainable benign in DB)
 TARGET_FPR_BOOTSTRAP = 0.05  # <1k benign
 TARGET_FPR_GROWTH = 0.01  # 1k–4,999 benign

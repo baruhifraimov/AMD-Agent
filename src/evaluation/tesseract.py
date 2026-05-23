@@ -179,9 +179,16 @@ def run_retrograde_eval(tracker: db.MalwareTracker | None = None) -> dict[str, f
 
 
 def append_eval_log(metrics: dict[str, float], path: Path | None = None) -> None:
+    from datetime import datetime, timezone
+
     cfg.ensure_dirs()
     p = path or cfg.EVAL_LOG_PATH
-    record = {"metrics": metrics}
+    record = {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "trigger": metrics.get("retrain_trigger", "periodic"),
+        "model_version": metrics.get("model_version", ""),
+        "metrics": metrics,
+    }
     with p.open("a") as f:
         f.write(json.dumps(record) + "\n")
 

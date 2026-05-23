@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timezone
 
 import src.db.tracker as db
 from src.config import allow_local_benign
@@ -26,7 +27,14 @@ def _force_feature_reselection(drift_stats: dict[str, float]) -> bool:
     return mean_shift >= 3.0 or corr_shift >= 0.7
 
 
+def _make_model_version() -> str:
+    return f"v_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
+
+
 def model_retrain(state: AgentState) -> dict:
+    trigger = "drift_detected" if state.drift_detected else "threshold_retrain"
+    model_version = _make_model_version()
+
     tracker = db.get_tracker()
     if allow_local_benign():
         ingest_benign_corpus(tracker)
@@ -59,21 +67,26 @@ def model_retrain(state: AgentState) -> dict:
             continue
         new_features.append(dict(item))
         new_labels.append(label)
-        
-    task_id = tracker.create_task(trigger="drift_detected", sample_count=len(new_hashes))
+
+    task_id = tracker.create_task(
+        trigger=trigger,
+        sample_count=len(new_hashes),
+        model_version=model_version,
+    )
     for h in new_hashes:
         tracker.update_sample_task(h, task_id)
 
     if not new_features and state.new_labeled_batch:
         logger.warning(
-            "MADAR retrain skipped: drift batch had %d sample(s) but none with verified labels",
+            "MADAR retrain skipped: %s batch had %d sample(s) but none with verified labels",
+            trigger,
             len(state.new_labeled_batch),
         )
-        return _retrain_skipped(state, historical_features, new_features)
+        return _retrain_skipped(state, historical_features, new_features, trigger)
 
     try:
         from src.ml.classifier import load_bundle
-        
+
         feature_reselection = _force_feature_reselection(state.drift_stats)
         bundle = madar_retrain(
             historical_features,
@@ -86,20 +99,32 @@ def model_retrain(state: AgentState) -> dict:
         )
     except ValueError as exc:
         logger.warning("MADAR retrain skipped: %s", exc)
-        return _retrain_skipped(state, historical_features, new_features)
+        return _retrain_skipped(state, historical_features, new_features, trigger)
 
     if bundle is None:
         logger.warning("MADAR retrain skipped; no reusable model bundle is available")
-        return _retrain_skipped(state, historical_features, new_features)
+        return _retrain_skipped(state, historical_features, new_features, trigger)
 
-    logger.info("MADAR retrain complete; threshold=%.4f", bundle.get("threshold", 0.5))
+    # Mark all active featured samples as trained
+    trained_count = tracker.mark_all_trained(task_id)
+    logger.info(
+        "MADAR retrain complete [trigger=%s, model_version=%s]; "
+        "threshold=%.4f, marked %d samples as trained",
+        trigger,
+        model_version,
+        bundle.get("threshold", 0.5),
+        trained_count,
+    )
 
     return {
         "drift_detected": False,
+        "threshold_retrain": False,
         "new_labeled_batch": [],
         "evaluation_metrics": {
             **state.evaluation_metrics,
             "retrained": 1.0,
+            "retrain_trigger": trigger,
+            "model_version": model_version,
             "replay_size": float(len(historical_features)),
             "new_batch_size": float(len(new_features)),
             "feature_reselection": 1.0 if feature_reselection else 0.0,
@@ -111,13 +136,16 @@ def _retrain_skipped(
     state: AgentState,
     historical_features: list[dict],
     new_features: list[dict],
+    trigger: str = "drift_detected",
 ) -> dict:
     return {
         "drift_detected": False,
+        "threshold_retrain": False,
         "new_labeled_batch": [],
         "evaluation_metrics": {
             **state.evaluation_metrics,
             "retrained": 0.0,
+            "retrain_trigger": trigger,
             "retrain_skipped_single_class": 1.0,
             "replay_size": float(len(historical_features)),
             "new_batch_size": float(len(new_features)),
