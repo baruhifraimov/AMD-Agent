@@ -25,6 +25,7 @@ from src.config import (
     OPTUNA_TIMEOUT,
     OPTUNA_TRIALS,
     TARGET_FPR,
+    get_dynamic_target_fpr,
     allow_local_benign,
     ensure_dirs,
 )
@@ -33,6 +34,14 @@ from src.ml.features import extract_pe_features, features_to_vector, vectorize_b
 from src.ml.splits import stratified_split, temporal_split
 
 logger = logging.getLogger(__name__)
+
+
+def resolve_target_fpr(benign_count: int | None = None) -> float:
+    """Resolve FPR target from SQLite trainable benign count (or explicit count)."""
+    if benign_count is None:
+        benign_count = db.get_tracker().count_by_label().get(0, 0)
+    return get_dynamic_target_fpr(benign_count)
+
 
 try:  # Optional fallback keeps source-mounted Docker runs alive before rebuild.
     import optuna
@@ -127,9 +136,11 @@ def save_bundle(
 def fit_threshold(
     y_true: np.ndarray,
     y_score: np.ndarray,
-    target_fpr: float = TARGET_FPR,
+    target_fpr: float | None = None,
 ) -> float:
     """Pick a finite threshold with maximal TPR while FPR stays below target."""
+    if target_fpr is None:
+        target_fpr = resolve_target_fpr()
     if len(y_true) == 0 or len(y_score) == 0 or len(np.unique(y_true)) < 2:
         return 0.5
     fpr, tpr, thresholds = roc_curve(y_true, y_score)
@@ -285,7 +296,7 @@ def _trial_score(
     scores: np.ndarray,
     threshold: float,
     *,
-    target_fpr: float = TARGET_FPR,
+    target_fpr: float,
 ) -> float:
     metrics = _binary_metrics(y_true, scores, threshold)
     fpr = metrics.get("fpr", 1.0)
@@ -303,6 +314,7 @@ def _optimize_lightgbm_params(
     *,
     optimize: bool,
     feature_names: list[str],
+    target_fpr: float,
 ) -> dict[str, Any]:
     base = _lgbm_default_params(len(y_train))
     if (
@@ -334,8 +346,8 @@ def _optimize_lightgbm_params(
             y_val=y_val,
         )
         scores = predict_proba(model, X_val, feature_names=feature_names)
-        threshold = fit_threshold(y_val, scores)
-        return _trial_score(y_val, scores, threshold)
+        threshold = fit_threshold(y_val, scores, target_fpr=target_fpr)
+        return _trial_score(y_val, scores, threshold, target_fpr=target_fpr)
 
     try:
         study = optuna.create_study(direction="maximize")
@@ -354,19 +366,24 @@ def _split_metadata(
     y_train: np.ndarray,
     y_val: np.ndarray,
     y_test: np.ndarray | None = None,
-    threshold_target_fpr: float = TARGET_FPR,
+    threshold_target_fpr: float | None = None,
 ) -> dict[str, Any]:
+    resolved_fpr = (
+        float(threshold_target_fpr)
+        if threshold_target_fpr is not None
+        else resolve_target_fpr()
+    )
     val_benign = int(np.sum(y_val == 0)) if len(y_val) else 0
     min_observable_fpr = 1.0 / val_benign if val_benign else 1.0
     meta: dict[str, Any] = {
         "split_mode": split_mode,
         "train_class_counts": class_counts_from_labels(y_train),
         "val_class_counts": class_counts_from_labels(y_val) if len(y_val) else {},
-        "threshold_target_fpr": float(threshold_target_fpr),
+        "threshold_target_fpr": resolved_fpr,
         "threshold_validation_benign": val_benign,
         "threshold_min_observable_fpr": float(min_observable_fpr),
         "threshold_target_supported": bool(
-            val_benign > 0 and min_observable_fpr <= threshold_target_fpr
+            val_benign > 0 and min_observable_fpr <= resolved_fpr
         ),
     }
     if y_test is not None and len(y_test):
@@ -400,6 +417,12 @@ def fit_model_artifact(
 ) -> dict[str, Any]:
     if len(np.unique(y_train)) < 2:
         raise ValueError("training split has fewer than 2 classes")
+    target_fpr = resolve_target_fpr()
+    logger.info(
+        "Threshold target FPR=%.4f (trainable benign in DB=%d)",
+        target_fpr,
+        db.get_tracker().count_by_label().get(0, 0),
+    )
     selected = _resolve_selected_features(X_train, y_train, frozen_feature_indices)
     selected_names = [FEATURE_NAMES[i] for i in selected]
     X_train_sel = _apply_selected(X_train, selected)
@@ -411,6 +434,7 @@ def fit_model_artifact(
         y_val,
         optimize=optimize,
         feature_names=selected_names,
+        target_fpr=target_fpr,
     )
     model = lgb.LGBMClassifier(**params)
     _fit_lightgbm(
@@ -422,17 +446,20 @@ def fit_model_artifact(
         y_val=y_val if len(y_val) else None,
     )
     val_scores = predict_proba(model, X_val_sel, feature_names=selected_names) if len(y_val) else np.array([])
-    threshold = fit_threshold(y_val, val_scores) if len(y_val) else 0.5
+    threshold = (
+        fit_threshold(y_val, val_scores, target_fpr=target_fpr) if len(y_val) else 0.5
+    )
     threshold_meta = _split_metadata(
         split_mode=split_mode,
         y_train=y_train,
         y_val=y_val,
+        threshold_target_fpr=target_fpr,
     )
     if not threshold_meta["threshold_target_supported"] and len(y_val):
         logger.info(
             "Threshold target FPR %.4f is below validation resolution %.4f "
             "(benign=%d); treating threshold as small-sample calibration",
-            TARGET_FPR,
+            target_fpr,
             threshold_meta["threshold_min_observable_fpr"],
             threshold_meta["threshold_validation_benign"],
         )
@@ -469,7 +496,14 @@ def continue_training(
     
     if len(np.unique(y_train)) < 2:
         raise ValueError("training split has fewer than 2 classes")
-        
+
+    target_fpr = resolve_target_fpr()
+    logger.info(
+        "Continuation threshold target FPR=%.4f (trainable benign in DB=%d)",
+        target_fpr,
+        db.get_tracker().count_by_label().get(0, 0),
+    )
+
     old_model = old_bundle["model"]
     selected = old_bundle.get("selected_feature_indices") or list(range(X_train.shape[1]))
     selected_names = old_bundle.get("selected_feature_names") or [FEATURE_NAMES[i] for i in selected]
@@ -498,11 +532,16 @@ def continue_training(
     )
     
     val_scores = predict_proba(model, X_val_sel, feature_names=selected_names) if len(y_val) else np.array([])
-    threshold = fit_threshold(y_val, val_scores) if len(y_val) else old_bundle.get("threshold", 0.5)
+    threshold = (
+        fit_threshold(y_val, val_scores, target_fpr=target_fpr)
+        if len(y_val)
+        else old_bundle.get("threshold", 0.5)
+    )
     threshold_meta = _split_metadata(
         split_mode="temporal_continuation",
         y_train=y_train,
         y_val=y_val,
+        threshold_target_fpr=target_fpr,
     )
     
     bundle: dict[str, Any] = {

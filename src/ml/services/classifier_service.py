@@ -6,7 +6,7 @@ from typing import Any
 
 import numpy as np
 
-from src.ml.classifier import cold_start_train, fit_threshold, retrain_model
+from src.ml.classifier import cold_start_train, fit_threshold, retrain_model, resolve_target_fpr
 
 
 class ClassifierService:
@@ -23,5 +23,5 @@ class ClassifierService:
         target_fpr: float | None = None,
     ) -> float:
         if target_fpr is None:
-            return fit_threshold(y_true, y_score)
+            target_fpr = resolve_target_fpr()
         return fit_threshold(y_true, y_score, target_fpr=target_fpr)

@@ -14,6 +14,8 @@ from river.drift import ADWIN
 from src.config import (
     ADWIN_DELTA,
     ADWIN_PATH,
+    DRIFT_CORR_SHIFT_THRESHOLD,
+    DRIFT_MEAN_SHIFT_THRESHOLD,
     DRIFT_WINDOW_DAYS,
     DRIFT_MIN_WINDOW_SAMPLES,
     ensure_dirs,
@@ -149,7 +151,10 @@ class DriftMonitor:
             "window_samples": float(window),
             "window_days": float(DRIFT_WINDOW_DAYS),
         }
-        drift = mean_shift >= 1.5 or corr_shift >= 0.35
+        drift = (
+            mean_shift >= DRIFT_MEAN_SHIFT_THRESHOLD
+            or corr_shift >= DRIFT_CORR_SHIFT_THRESHOLD
+        )
         if drift:
             logger.info(
                 "Multivariate drift detected mean_shift=%.4f corr_shift=%.4f",
