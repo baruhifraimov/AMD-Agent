@@ -78,8 +78,10 @@ def _fix_json_quirks(text: str) -> str:
     return text
 
 
-def _json_from_text(text: str) -> dict[str, Any] | list[Any] | None:
+def _json_from_text(text: str | None) -> dict[str, Any] | list[Any] | None:
     """Extract JSON from LLM output, tolerating markdown fences and quirks."""
+    if text is None:
+        return None
     text = text.strip()
     if not text:
         return None

@@ -1,4 +1,4 @@
-"""Dynamic CTI search helpers with conservative network guardrails."""
+"""CTI text extraction helpers with conservative network guardrails."""
 
 from __future__ import annotations
 
@@ -64,7 +64,7 @@ def _record_host_failure(url: str, status_code: int | None) -> None:
 
 
 def fetch_public_text(url: str) -> str:
-    """Fetch a public web page and return text, bounded by size and timeout."""
+    """Fetch a known public CTI URL and return text, bounded by size and timeout."""
     if not is_public_url(url):
         return ""
     if _host_blocked(url):
