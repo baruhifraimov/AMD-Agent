@@ -3,6 +3,7 @@
 from unittest.mock import MagicMock, patch
 
 from src.nodes.binary_fetch import binary_fetch
+from src.nodes.classifier_inference import classifier_inference
 from src.nodes.data_validation import data_validation
 from src.nodes.drift_monitor import drift_monitor
 from src.nodes.explain_drift_context import explain_drift_context
@@ -61,6 +62,19 @@ def test_drift_monitor_no_drift_on_small_batch(tmp_paths):
         section_entropies=[0.5],
     )
     assert drift_monitor(state)["drift_detected"] is False
+
+
+@patch("src.nodes.classifier_inference.record_model_update_comparison")
+@patch("src.nodes.classifier_inference.score_samples", return_value={})
+@patch("src.nodes.classifier_inference.cold_start_train")
+@patch("src.nodes.classifier_inference.load_bundle", return_value=None)
+def test_classifier_inference_records_cold_start_baseline(
+    _load_bundle, mock_cold_start, _score_samples, mock_record, tmp_paths
+):
+    mock_cold_start.return_value = {"threshold": 0.5, "model_version": "v_start"}
+    out = classifier_inference(AgentState())
+    mock_record.assert_called_once()
+    assert out["evaluation_metrics"]["model_ready"] == 1.0
 
 
 @patch("src.nodes.binary_fetch.download_pe_candidate")

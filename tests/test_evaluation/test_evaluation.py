@@ -6,6 +6,10 @@ from unittest.mock import patch
 import numpy as np
 
 from src.config import FEATURE_DIM, FEATURE_NAMES, FEATURE_SET_VERSION
+from src.evaluation.model_update import (
+    append_model_update_log,
+    build_model_update_record,
+)
 from src.evaluation.tesseract import append_eval_log, plot_performance_decay, run_tesseract_eval
 from src.nodes.evaluation_node import evaluation_node
 from src.state import AgentState
@@ -65,6 +69,95 @@ def test_training_order_uses_ingested_at(tmp_paths):
     )
     rows = tracker.fetch_labeled_with_features()
     assert [r["sha256"] for r in rows] == [benign_sha, malware_sha]
+
+
+@patch("src.evaluation.model_update.model_bundle_ready", return_value=True)
+@patch("src.evaluation.model_update.score_feature_matrix")
+def test_model_update_record_compares_previous_and_updated(mock_score, _ready, tmp_paths):
+    tracker = tmp_paths["tracker"]
+    for i in range(20):
+        sha = f"{i:064x}"
+        tracker.insert_sample(
+            sha,
+            f"/tmp/{sha}.bin",
+            f"2024-01-{i + 1:02d} 00:00:00",
+            features=_features(float(i)),
+            label=i % 2,
+        )
+    mock_score.side_effect = [
+        np.array([0.9, 0.9, 0.1]),
+        np.array([0.9, 0.1, 0.9]),
+    ]
+    record = build_model_update_record(
+        trigger="threshold_retrain",
+        previous_bundle={"threshold": 0.5},
+        updated_bundle={"threshold": 0.5, "model_version": "v_test"},
+        model_version="v_test",
+        tracker=tracker,
+    )
+    assert record["status"] == "ok"
+    assert record["previous_metrics"]["accuracy"] < record["updated_metrics"]["accuracy"]
+    assert record["delta_metrics"]["fpr"] < 0
+
+
+@patch("src.evaluation.model_update.model_bundle_ready", return_value=True)
+@patch("src.evaluation.model_update.score_feature_matrix", return_value=np.array([0.9, 0.1, 0.9]))
+def test_model_update_record_baseline_created(_score, _ready, tmp_paths):
+    tracker = tmp_paths["tracker"]
+    for i in range(20):
+        sha = f"{i:064x}"
+        tracker.insert_sample(
+            sha,
+            f"/tmp/{sha}.bin",
+            f"2024-01-{i + 1:02d} 00:00:00",
+            features=_features(float(i)),
+            label=i % 2,
+        )
+    record = build_model_update_record(
+        trigger="cold_start",
+        previous_bundle=None,
+        updated_bundle={"threshold": 0.5, "model_version": "v_start"},
+        model_version="v_start",
+        tracker=tracker,
+    )
+    assert record["status"] == "baseline_created"
+    assert record["previous_metrics"] == {}
+    assert record["updated_metrics"]["recall"] == 1.0
+
+
+def test_model_update_record_skips_unhealthy_holdout(tmp_paths):
+    tracker = tmp_paths["tracker"]
+    for i in range(4):
+        sha = f"{i:064x}"
+        tracker.insert_sample(
+            sha,
+            f"/tmp/{sha}.bin",
+            f"2024-01-{i + 1:02d} 00:00:00",
+            features=_features(float(i)),
+            label=i % 2,
+        )
+    record = build_model_update_record(
+        trigger="threshold_retrain",
+        previous_bundle={"threshold": 0.5},
+        updated_bundle={"threshold": 0.5, "model_version": "v_test"},
+        model_version="v_test",
+        tracker=tracker,
+    )
+    assert record["status"] == "skipped_unhealthy_holdout"
+    assert record["updated_metrics"] == {}
+
+
+def test_append_model_update_log(tmp_paths):
+    path = tmp_paths["db"].parent / "model_update.jsonl"
+    append_model_update_log(
+        {
+            "timestamp": "2024-01-01T00:00:00+00:00",
+            "event": "model_update_comparison",
+            "status": "ok",
+        },
+        path=path,
+    )
+    assert json.loads(path.read_text().strip())["event"] == "model_update_comparison"
 
 
 def test_plot_performance_decay_uses_figures_dir(tmp_path, tmp_paths):

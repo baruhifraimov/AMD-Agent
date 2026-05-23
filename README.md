@@ -31,6 +31,7 @@ START
 - `ExplainDriftContext`: asks Ollama to summarize drift statistics and anomalous static PE features into a semantic drift report (deterministic fallback when Ollama is unavailable).
 - `ModelRetrain`: retrains with MADAR replay buffer. Single-class retrain batches are skipped safely.
 - `Evaluation` (LangGraph node): runs TESSERACT chronological eval on a configurable cadence, appends `evaluation_log.jsonl`, plots decay; on retrain/drift cycles it always runs and writes `drift_log.jsonl` with pre/post metrics.
+- `ModelUpdateComparison`: after each successful cold-start or retrain update, compares the previous production model against the updated model on the same temporal holdout and appends `model_update_log.jsonl`.
 
 The initial LightGBM model is not considered ready until SQLite contains at
 least 100 active malware samples and 100 active benign samples with extracted
@@ -366,6 +367,7 @@ Report artifacts (Docker paths; local dev uses `data/`):
 | `/data/evaluation_log.jsonl` | Per-run TESSERACT metrics (accuracy, FPR, AUT) |
 | `/data/evaluation_state.json` | Persistent counter for periodic evaluation cadence |
 | `/data/drift_log.jsonl` | Concept drift events with pre/post metrics and semantic report excerpt |
+| `/data/model_update_log.jsonl` | Per-model-update before/after metrics: accuracy, precision, recall, FPR |
 | `/data/figures/performance_decay.png` | Accuracy/FPR over evaluation runs |
 
 For LaTeX builds, copy or symlink the decay plot into `report/figures/performance_decay.png` after a long daemon session.

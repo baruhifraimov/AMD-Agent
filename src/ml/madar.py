@@ -156,6 +156,7 @@ def madar_retrain(
     force_feature_reselection: bool = False,
     budget_strategy: str = MADAR_BUDGET_STRATEGY,
     init_model: dict[str, Any] | None = None,
+    model_metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     """MADAR-faithful retrain: family-aware replay + model continuation."""
     X_hist = vectorize_batch(historical_features) if historical_features else np.empty((0, 0))
@@ -211,8 +212,9 @@ def madar_retrain(
             return continue_training(
                 X, y, X, y,  # Note: normally should use validation split
                 old_bundle=init_model,
+                model_metadata=model_metadata,
             )
         except Exception as exc:
             logger.warning("[%s] continue_training failed: %s; falling back to retrain_model", PHASE_RETRAIN, exc)
 
-    return retrain_model(X, y, frozen_feature_indices=frozen)
+    return retrain_model(X, y, frozen_feature_indices=frozen, model_metadata=model_metadata)

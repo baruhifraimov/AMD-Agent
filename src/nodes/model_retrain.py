@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
-
 import src.db.tracker as db
 from src.config import allow_local_benign
+from src.evaluation.model_update import record_model_update_comparison
 from src.evaluation.training_history import count_retrains
 from src.log import PHASE_RETRAIN, get_logger, phase_log, task_status
-from src.ml.classifier import ingest_benign_corpus
+from src.ml.classifier import ingest_benign_corpus, load_bundle, make_model_version
 from src.ml.madar import madar_retrain
 from src.state import AgentState
 
@@ -26,10 +25,6 @@ def _force_feature_reselection(drift_stats: dict[str, float]) -> bool:
     mean_shift = float(drift_stats.get("mean_shift", 0.0) or 0.0)
     corr_shift = float(drift_stats.get("corr_shift", 0.0) or 0.0)
     return mean_shift >= 3.0 or corr_shift >= 0.7
-
-
-def _make_model_version() -> str:
-    return f"v_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
 
 
 def model_retrain(state: AgentState) -> dict:
@@ -88,8 +83,7 @@ def model_retrain(state: AgentState) -> dict:
         return _retrain_skipped(state, historical_features, new_features, trigger)
 
     try:
-        from src.ml.classifier import load_bundle
-
+        previous_bundle = load_bundle()
         feature_reselection = _force_feature_reselection(state.drift_stats)
         with task_status(PHASE_RETRAIN, f"MADAR retrain ({trigger})"):
             bundle = madar_retrain(
@@ -99,7 +93,11 @@ def model_retrain(state: AgentState) -> dict:
                 new_labels,
                 historical_families=historical_families,
                 force_feature_reselection=feature_reselection,
-                init_model=load_bundle(),
+                init_model=previous_bundle,
+                model_metadata={
+                    "model_version": model_version,
+                    "update_trigger": trigger,
+                },
             )
     except ValueError as exc:
         logger.warning("[%s] MADAR retrain skipped: %s", PHASE_RETRAIN, exc)
@@ -107,6 +105,10 @@ def model_retrain(state: AgentState) -> dict:
 
     if bundle is None:
         logger.warning("[%s] MADAR retrain skipped; no reusable model bundle is available", PHASE_RETRAIN)
+        return _retrain_skipped(state, historical_features, new_features, trigger)
+
+    if bundle.get("model_version") != model_version:
+        logger.warning("[%s] MADAR retrain reused existing model; no model update recorded", PHASE_RETRAIN)
         return _retrain_skipped(state, historical_features, new_features, trigger)
 
     trained_count = tracker.mark_all_trained(task_id)
@@ -118,6 +120,13 @@ def model_retrain(state: AgentState) -> dict:
         model_version,
         bundle.get("threshold", 0.5),
         trained_count,
+    )
+    record_model_update_comparison(
+        trigger=trigger,
+        previous_bundle=previous_bundle,
+        updated_bundle=bundle,
+        model_version=model_version,
+        tracker=tracker,
     )
 
     return {
