@@ -27,7 +27,7 @@ START
 - `DataValidation`: checks MZ header, validates `PE\0\0` at `e_lfanew`, verifies filename SHA256, de-duplicates, skips known corrupted hashes, and syncs SQLite status.
 - `FeatureExtraction`: extracts a deterministic 2304-dimensional EMBER-like static vector: PE headers/directories, Authenticode metadata, warnings, byte and byte-entropy histograms, string distributions, hashed imports/exports/sections, and lightweight instruction features. Parse failures are triaged and marked `corrupted`.
 - `DriftMonitor`: uses River ADWIN over section entropy plus rolling multivariate shift checks over selected model features.
-- `ClassifierInference`: scores samples with an XGBoost-ranked, Optuna-tuned LightGBM pipeline and FPR-aware thresholding.
+- `ClassifierInference`: scores samples with an XGBoost-ranked, Optuna-tuned LightGBM pipeline and FPR-aware thresholding (target FPR scales with trainable benign volume in SQLite: 5% below 1k, 1% from 1k–5k, 0.1% at 5k+; see `get_dynamic_target_fpr()` in `src/config.py`).
 - `ExplainDriftContext`: runs `capa -j -r <rules_dir>` and asks Ollama to produce a semantic drift report.
 - `ModelRetrain`: retrains with MADAR replay buffer. Single-class retrain batches are skipped safely.
 - `Evaluation` (LangGraph node): runs TESSERACT chronological eval on a configurable cadence, appends `evaluation_log.jsonl`, plots decay; on retrain/drift cycles it always runs and writes `drift_log.jsonl` with pre/post metrics.
@@ -337,7 +337,7 @@ It uses:
 
 - chronological train/validation/test splits with a temporary temporal model,
 - accuracy, precision, recall, FPR,
-- dynamic threshold targeting `TARGET_FPR = 0.001`,
+- dynamic threshold targeting adaptive FPR (`resolve_target_fpr()`; production ceiling `TARGET_FPR = 0.001` at 5k+ benign),
 - AUT (`Area Under Time`) over historical accuracy,
 - performance plot at `FIGURES_DIR/performance_decay.png`.
 

@@ -33,10 +33,25 @@ else:
     FIGURES_DIR = PROJECT_ROOT / "report" / "figures"
 
 REPLAY_BUDGET = 3000
-MIN_TRAIN_MALWARE = 100
-MIN_TRAIN_BENIGN = 100
+MIN_TRAIN_MALWARE = 25
+MIN_TRAIN_BENIGN = 25
 PE_FETCH_LIMIT = 10
-TARGET_FPR = 0.001
+TARGET_FPR = 0.001  # production ceiling (5k+ trainable benign in DB)
+TARGET_FPR_BOOTSTRAP = 0.05  # <1k benign
+TARGET_FPR_GROWTH = 0.01  # 1k–4,999 benign
+TARGET_FPR_BENIGN_TIER_BOOTSTRAP = 1000
+TARGET_FPR_BENIGN_TIER_PRODUCTION = 5000
+
+
+def get_dynamic_target_fpr(num_benign_samples: int) -> float:
+    """Scale FPR target with trainable benign volume in SQLite."""
+    if num_benign_samples < TARGET_FPR_BENIGN_TIER_BOOTSTRAP:
+        return TARGET_FPR_BOOTSTRAP
+    if num_benign_samples < TARGET_FPR_BENIGN_TIER_PRODUCTION:
+        return TARGET_FPR_GROWTH
+    return TARGET_FPR
+
+
 FEATURE_SET_VERSION = "ember_static_v1"
 FEATURE_DIM = 2304
 
@@ -79,10 +94,12 @@ CONTINUATION_TREES = 50
 MAX_TOTAL_TREES = 500
 MODEL_ARCHIVE_DEPTH = 5
 
-# Drift / ML tuning
+# Drift / ML tuning (DEV: sensitive — revert before production: 60 / 50 / 1.5 / 0.35)
 ADWIN_DELTA = 0.002
-DRIFT_WINDOW_DAYS = 60
-DRIFT_MIN_WINDOW_SAMPLES = 50
+DRIFT_WINDOW_DAYS = 0  # 0 = disable time pruning (_prune_time_window no-op)
+DRIFT_MIN_WINDOW_SAMPLES = 5  # multivariate needs len(vectors) >= 10 (5 * 2)
+DRIFT_MEAN_SHIFT_THRESHOLD = 0.2  # production: 1.5
+DRIFT_CORR_SHIFT_THRESHOLD = 0.1  # production: 0.35
 REPLAY_FRACTION = 0.3  # DEPRECATED
 FEATURE_SELECTION_K = 384
 OPTUNA_TRIALS = 25
@@ -151,7 +168,6 @@ CAPA_RULES_DIR = Path("/opt/capa-rules")
 REPORT_LANGUAGE = "English"
 
 # --- Secrets and deployment endpoints (from environment only) ---
-
 OLLAMA_BASE_URL = os.getenv("AMD_OLLAMA_BASE_URL").strip()
 OLLAMA_MODEL = os.getenv("AMD_OLLAMA_MODEL").strip()
 

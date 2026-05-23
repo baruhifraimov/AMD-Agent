@@ -18,6 +18,7 @@ from src.ml.classifier import (
     fit_model_artifact,
     load_bundle,
     model_bundle_ready,
+    resolve_target_fpr,
     score_feature_matrix,
 )
 
@@ -100,7 +101,7 @@ def run_tesseract_eval(
     y_pred = (test_scores >= threshold).astype(int)
     metrics = compute_metrics(y_test, y_pred)
     metrics["threshold"] = threshold
-    metrics["target_fpr"] = cfg.TARGET_FPR
+    metrics["target_fpr"] = resolve_target_fpr()
     metrics["split_mode_temporal"] = 1.0
     metrics["train_support"] = float(len(y_train))
     metrics["val_support"] = float(len(y_val))
@@ -116,7 +117,7 @@ def run_tesseract_eval(
     min_observable_fpr = 1.0 / val_benign if val_benign else 1.0
     metrics["threshold_min_observable_fpr"] = float(min_observable_fpr)
     metrics["threshold_target_supported"] = (
-        1.0 if val_benign > 0 and min_observable_fpr <= cfg.TARGET_FPR else 0.0
+        1.0 if val_benign > 0 and min_observable_fpr <= resolve_target_fpr() else 0.0
     )
     metrics["aut"] = compute_aut(_historical_metric_values("accuracy") + [metrics["accuracy"]])
     return metrics
