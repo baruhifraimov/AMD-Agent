@@ -20,6 +20,7 @@ if _in_container:
     EVAL_LOG_PATH = Path("/data/evaluation_log.jsonl")
     EVAL_STATE_PATH = Path("/data/evaluation_state.json")
     DRIFT_LOG_PATH = Path("/data/drift_log.jsonl")
+    MODEL_UPDATE_LOG_PATH = Path("/data/model_update_log.jsonl")
     LOG_PATH = Path("/data/logs/amd-agent.log")
     FIGURES_DIR = Path("/data/figures")
     REPOS_DIR = Path("/data/repos")
@@ -32,6 +33,7 @@ else:
     EVAL_LOG_PATH = PROJECT_ROOT / "data" / "evaluation_log.jsonl"
     EVAL_STATE_PATH = PROJECT_ROOT / "data" / "evaluation_state.json"
     DRIFT_LOG_PATH = PROJECT_ROOT / "data" / "drift_log.jsonl"
+    MODEL_UPDATE_LOG_PATH = PROJECT_ROOT / "data" / "model_update_log.jsonl"
     LOG_PATH = PROJECT_ROOT / "data" / "logs" / "amd-agent.log"
     FIGURES_DIR = PROJECT_ROOT / "report" / "figures"
     REPOS_DIR = PROJECT_ROOT / "data" / "repos"
@@ -40,8 +42,8 @@ else:
 
 # MALWAREBAZAAR_AUTH_KEY, GITHUB_TOKEN, MALSHARE_API_KEY: use get_*() helpers below.
 OTX_API_KEY = os.getenv("OTX_API_KEY", "").strip()
-OLLAMA_BASE_URL = os.getenv("AMD_OLLAMA_BASE_URL").strip()
-OLLAMA_MODEL = os.getenv("AMD_OLLAMA_MODEL").strip()
+OLLAMA_BASE_URL = os.getenv("AMD_OLLAMA_BASE_URL", "").strip()
+OLLAMA_MODEL = os.getenv("AMD_OLLAMA_MODEL", "").strip()
 
 # --- Scheduler and bootstrap ---
 
@@ -356,6 +358,7 @@ def ensure_dirs() -> None:
         FIGURES_DIR,
         EVAL_STATE_PATH.parent,
         DRIFT_LOG_PATH.parent,
+        MODEL_UPDATE_LOG_PATH.parent,
         LOG_PATH.parent,
         REPOS_DIR,
     ):

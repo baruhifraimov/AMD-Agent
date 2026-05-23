@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 import math
 from pathlib import Path
 from typing import Any
@@ -34,6 +35,10 @@ from src.log import PHASE_ML, get_logger, phase_log, vlog
 from src.ml.splits import stratified_split, temporal_split
 
 logger = get_logger(__name__)
+
+
+def make_model_version() -> str:
+    return f"v_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
 
 
 def resolve_target_fpr(benign_count: int | None = None) -> float:
@@ -415,6 +420,7 @@ def fit_model_artifact(
     bootstrap_sanity_metrics: dict[str, float] | None = None,
     frozen_feature_indices: list[int] | None = None,
     split_mode: str = "temporal",
+    model_metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     if len(np.unique(y_train)) < 2:
         raise ValueError("training split has fewer than 2 classes")
@@ -478,6 +484,9 @@ def fit_model_artifact(
         "selected_feature_names": selected_names,
         "optuna_best_params": params,
         "split_metadata": threshold_meta,
+        "training_counts": {
+            str(label): int(count) for label, count in class_counts_from_labels(y_train).items()
+        },
     }
     if training_counts is not None:
         bundle["training_counts"] = {
@@ -485,6 +494,8 @@ def fit_model_artifact(
         }
     if bootstrap_sanity_metrics is not None:
         bundle["bootstrap_sanity_metrics"] = bootstrap_sanity_metrics
+    if model_metadata:
+        bundle.update(model_metadata)
     return bundle
 
 
@@ -495,6 +506,7 @@ def continue_training(
     y_val: np.ndarray,
     *,
     old_bundle: dict[str, Any],
+    model_metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Continue training existing LightGBM model without retraining from scratch."""
     from src.config import CONTINUATION_TREES, MAX_TOTAL_TREES
@@ -561,7 +573,12 @@ def continue_training(
         "selected_feature_names": selected_names,
         "optuna_best_params": params,
         "split_metadata": threshold_meta,
+        "training_counts": {
+            str(label): int(count) for label, count in class_counts_from_labels(y_train).items()
+        },
     }
+    if model_metadata:
+        bundle.update(model_metadata)
     
     _save_bundle_dict(bundle)
     return load_bundle() or bundle
@@ -707,6 +724,7 @@ def cold_start_train(tracker: db.MalwareTracker) -> dict[str, Any] | None:
         )
         return None
 
+    model_version = make_model_version()
     try:
         bundle = fit_model_artifact(
             X_train,
@@ -716,6 +734,10 @@ def cold_start_train(tracker: db.MalwareTracker) -> dict[str, Any] | None:
             training_counts=counts,
             optimize=True,
             split_mode="stratified",
+            model_metadata={
+                "model_version": model_version,
+                "update_trigger": "cold_start",
+            },
         )
     except ValueError as exc:
         logger.warning("[%s] Cold-start skipped: %s", PHASE_ML, exc)
@@ -757,6 +779,7 @@ def retrain_model(
     *,
     val_fraction: float = 0.15,
     frozen_feature_indices: list[int] | None = None,
+    model_metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     """Retrain LightGBM with a chronological validation split."""
     if len(np.unique(y)) < 2:
@@ -804,6 +827,7 @@ def retrain_model(
             optimize=True,
             frozen_feature_indices=frozen,
             split_mode="temporal",
+            model_metadata=model_metadata,
         )
     except ValueError as exc:
         logger.warning("[%s] Retrain skipped: %s", PHASE_ML, exc)

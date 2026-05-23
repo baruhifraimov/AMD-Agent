@@ -105,21 +105,26 @@ def test_ratio_and_uniform_budget():
     assert sum(uniform.values()) == 100
 
 
+@patch("src.nodes.model_retrain.record_model_update_comparison")
+@patch("src.nodes.model_retrain.make_model_version", return_value="v_test")
 @patch("src.nodes.model_retrain.madar_retrain")
 @patch("src.nodes.model_retrain.ingest_benign_corpus")
-def test_model_retrain_calls_madar(mock_ingest, mock_madar, tmp_paths):
-    mock_madar.return_value = {"threshold": 0.42, "model": "m"}
+def test_model_retrain_calls_madar(mock_ingest, mock_madar, _version, mock_record, tmp_paths):
+    mock_madar.return_value = {"threshold": 0.42, "model": "m", "model_version": "v_test"}
     out = model_retrain(
         AgentState(new_labeled_batch=[{"sha256": "f" * 64, "label": 1, "avg_section_entropy": 1.0}])
     )
     mock_madar.assert_called_once()
+    mock_record.assert_called_once()
     assert out["evaluation_metrics"]["retrained"] == 1.0
 
 
+@patch("src.nodes.model_retrain.record_model_update_comparison")
 @patch("src.nodes.model_retrain.madar_retrain")
-def test_model_retrain_skips_unlabeled(mock_madar):
+def test_model_retrain_skips_unlabeled(mock_madar, mock_record):
     out = model_retrain(AgentState(new_labeled_batch=[{"sha256": "a" * 64}]))
     mock_madar.assert_not_called()
+    mock_record.assert_not_called()
     assert out["evaluation_metrics"]["retrained"] == 0.0
 
 

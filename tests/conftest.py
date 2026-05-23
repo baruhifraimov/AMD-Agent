@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import os
 import sys
 import zipfile
 from pathlib import Path
@@ -14,6 +15,8 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent
 _TESTS_ROOT = Path(__file__).resolve().parent
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
+
+os.environ.setdefault("MALWAREBAZAAR_AUTH_KEY", "test-key")
 
 # When pytest is run from repo root with no path args, skip non-test trees.
 _SKIP_COLLECT_DIRS = frozenset(
@@ -61,6 +64,7 @@ def tmp_paths(tmp_path, monkeypatch):
     monkeypatch.setattr("src.config.EVAL_LOG_PATH", tmp_path / "eval.jsonl")
     monkeypatch.setattr("src.config.EVAL_STATE_PATH", tmp_path / "eval_state.json")
     monkeypatch.setattr("src.config.DRIFT_LOG_PATH", tmp_path / "drift.jsonl")
+    monkeypatch.setattr("src.config.MODEL_UPDATE_LOG_PATH", tmp_path / "model_update.jsonl")
     monkeypatch.setattr("src.config.FIGURES_DIR", tmp_path / "figures")
     monkeypatch.setattr(
         "src.nodes.evaluation_node.EVAL_STATE_PATH",

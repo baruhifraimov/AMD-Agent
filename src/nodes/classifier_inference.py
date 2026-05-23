@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import src.db.tracker as db
 from src.config import MIN_TRAIN_BENIGN, MIN_TRAIN_MALWARE
+from src.evaluation.model_update import record_model_update_comparison
 from src.log import PHASE_INFERENCE, get_logger, phase_log, vlog
 from src.ml.classifier import (
     cold_start_train,
@@ -21,6 +22,7 @@ def classifier_inference(state: AgentState) -> dict:
     tracker = db.get_tracker()
     counts = tracker.count_by_label()
     bundle = load_bundle()
+    previous_bundle = bundle if model_bundle_ready(bundle) else None
     if bundle is not None and not model_bundle_ready(bundle):
         vlog(
             logger,
@@ -35,6 +37,14 @@ def classifier_inference(state: AgentState) -> dict:
         bundle = None
     if bundle is None:
         bundle = cold_start_train(tracker)
+        if bundle is not None:
+            record_model_update_comparison(
+                trigger="cold_start",
+                previous_bundle=previous_bundle,
+                updated_bundle=bundle,
+                model_version=str(bundle.get("model_version", "")),
+                tracker=tracker,
+            )
 
     metrics: dict[str, float] = dict(state.evaluation_metrics)
     predictions: dict[str, float] = dict(state.predictions)
