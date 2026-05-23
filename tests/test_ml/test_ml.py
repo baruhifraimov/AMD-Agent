@@ -9,6 +9,7 @@ import pytest
 from src.config import (
     FEATURE_DIM,
     FEATURE_NAMES,
+    FEATURE_SET_VERSION,
     TARGET_FPR,
     TARGET_FPR_BOOTSTRAP,
     TARGET_FPR_GROWTH,
@@ -24,7 +25,7 @@ from src.ml.classifier import (
     retrain_model,
     resolve_target_fpr,
 )
-from src.ml.madar import build_madar_replay
+from src.ml.madar import build_madar_replay, madar_retrain
 from src.ml.replay_budget import RatioBudget, UniformBudget
 from src.ml.splits import temporal_split
 from src.ml.services.retrain import RetrainService
@@ -110,13 +111,63 @@ def test_ratio_and_uniform_budget():
 @patch("src.nodes.model_retrain.madar_retrain")
 @patch("src.nodes.model_retrain.ingest_benign_corpus")
 def test_model_retrain_calls_madar(mock_ingest, mock_madar, _version, mock_record, tmp_paths):
-    mock_madar.return_value = {"threshold": 0.42, "model": "m", "model_version": "v_test"}
+    mock_madar.return_value = {
+        "threshold": 0.42,
+        "model": "m",
+        "model_version": "v_test",
+        "evaluation_mode": "strict_temporal_holdout",
+        "strict_holdout_excluded": True,
+    }
     out = model_retrain(
         AgentState(new_labeled_batch=[{"sha256": "f" * 64, "label": 1, "avg_section_entropy": 1.0}])
     )
     mock_madar.assert_called_once()
+    assert mock_madar.call_args.kwargs["init_model"] is None
+    assert mock_madar.call_args.kwargs["model_metadata"]["evaluation_mode"] == "strict_temporal_holdout"
+    assert mock_madar.call_args.kwargs["model_metadata"]["strict_holdout_excluded"] is True
     mock_record.assert_called_once()
+    assert mock_record.call_args.kwargs["holdout_excluded_from_training"] is True
     assert out["evaluation_metrics"]["retrained"] == 1.0
+
+
+@patch("src.nodes.model_retrain.record_model_update_comparison")
+@patch("src.nodes.model_retrain.make_model_version", return_value="v_test")
+@patch("src.nodes.model_retrain.madar_retrain")
+def test_model_retrain_excludes_temporal_holdout_from_madar(
+    mock_madar, _version, _record, tmp_paths
+):
+    tracker = tmp_paths["tracker"]
+    for i in range(20):
+        sha = f"{i:064x}"
+        tracker.insert_sample(
+            sha,
+            f"/tmp/{sha}.bin",
+            f"2024-01-{i + 1:02d} 00:00:00",
+            features={name: float(i) for name in FEATURE_NAMES},
+            label=i % 2,
+        )
+    mock_madar.return_value = {
+        "threshold": 0.42,
+        "model": "m",
+        "model_version": "v_test",
+        "evaluation_mode": "strict_temporal_holdout",
+        "strict_holdout_excluded": True,
+    }
+    out = model_retrain(
+        AgentState(
+            new_labeled_batch=[
+                {"sha256": f"{0:064x}", "label": 0, "avg_section_entropy": 0.0},
+                {"sha256": f"{17:064x}", "label": 1, "avg_section_entropy": 17.0},
+            ]
+        )
+    )
+    historical_features, new_features, historical_labels, new_labels = mock_madar.call_args.args[:4]
+    assert len(historical_features) == 16
+    assert {f["avg_section_entropy"] for f in historical_features} == set(range(1, 17))
+    assert [f["sha256"] for f in new_features] == [f"{0:064x}"]
+    assert len(historical_labels) == 16
+    assert new_labels == [0]
+    assert out["evaluation_metrics"]["holdout_excluded_count"] == 3.0
 
 
 @patch("src.nodes.model_retrain.record_model_update_comparison")
@@ -157,6 +208,31 @@ def test_continue_training(mock_load, mock_save, mock_fit, _mock_proba):
     with patch("src.config.CONTINUATION_TREES", 50), patch("src.config.MAX_TOTAL_TREES", 500):
         continue_training(X, y, X[:20], y[:20], old_bundle=old_bundle)
     assert mock_fit.call_args.kwargs["init_model"] == old_model
+
+
+@patch("src.ml.madar.retrain_model")
+@patch("src.ml.madar.continue_training", return_value={"model_version": "v_continued"})
+def test_madar_continuation_uses_distinct_validation_split(mock_continue, mock_retrain):
+    features = [{name: float(i) for name in FEATURE_NAMES} for i in range(40)]
+    labels = [i % 2 for i in range(40)]
+    init_bundle = {
+        "model": object(),
+        "threshold": 0.5,
+        "feature_set_version": FEATURE_SET_VERSION,
+        "feature_dim": FEATURE_DIM,
+        "feature_names": FEATURE_NAMES,
+        "selected_feature_indices": list(range(10)),
+        "selected_feature_names": FEATURE_NAMES[:10],
+    }
+    madar_retrain([], features, [], labels, init_model=init_bundle)
+    mock_continue.assert_called_once()
+    X_train, y_train, X_val, y_val = mock_continue.call_args.args[:4]
+    assert len(y_train) == 34
+    assert len(y_val) == 6
+    assert not np.array_equal(X_train, X_val)
+    assert len(np.unique(y_train)) == 2
+    assert len(np.unique(y_val)) == 2
+    mock_retrain.assert_not_called()
 
 
 @patch("src.ml.features.features_to_vector", return_value=np.zeros(2304))

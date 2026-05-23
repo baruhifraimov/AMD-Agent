@@ -9,6 +9,7 @@ from src.config import FEATURE_DIM, FEATURE_NAMES, FEATURE_SET_VERSION
 from src.evaluation.model_update import (
     append_model_update_log,
     build_model_update_record,
+    record_model_update_comparison,
 )
 from src.evaluation.tesseract import append_eval_log, plot_performance_decay, run_tesseract_eval
 from src.nodes.evaluation_node import evaluation_node
@@ -17,6 +18,25 @@ from src.state import AgentState
 
 def _features(value: float) -> dict[str, float]:
     return {name: value for name in FEATURE_NAMES}
+
+
+def _explicit_holdout(labels: list[int] | None = None) -> dict:
+    y = np.array(labels if labels is not None else [1, 0, 1], dtype=int)
+    return {
+        "evaluation_mode": "strict_temporal_holdout",
+        "x": np.zeros((len(y), FEATURE_DIM)),
+        "y": y,
+        "hashes": [f"h{i}" for i in range(len(y))],
+        "healthy": len(np.unique(y)) == 2,
+        "summary": {
+            "support": 20,
+            "holdout_support": len(y),
+            "test_benign": int(np.sum(y == 0)),
+            "test_malware": int(np.sum(y == 1)),
+            "healthy": len(np.unique(y)) == 2,
+        },
+        "reason": "" if len(np.unique(y)) == 2 else "single_class_holdout",
+    }
 
 
 @patch("src.evaluation.tesseract.compute_aut", return_value=0.75)
@@ -98,6 +118,7 @@ def test_model_update_record_compares_previous_and_updated(mock_score, _ready, t
     assert record["status"] == "ok"
     assert record["previous_metrics"]["accuracy"] < record["updated_metrics"]["accuracy"]
     assert record["delta_metrics"]["fpr"] < 0
+    assert record["evaluation_mode"] == "strict_temporal_holdout"
 
 
 @patch("src.evaluation.model_update.model_bundle_ready", return_value=True)
@@ -123,6 +144,83 @@ def test_model_update_record_baseline_created(_score, _ready, tmp_paths):
     assert record["status"] == "baseline_created"
     assert record["previous_metrics"] == {}
     assert record["updated_metrics"]["recall"] == 1.0
+
+
+@patch("src.evaluation.model_update.build_training_arrays", side_effect=AssertionError("split recomputed"))
+@patch("src.evaluation.model_update.model_bundle_ready", return_value=True)
+@patch("src.evaluation.model_update.score_feature_matrix")
+def test_model_update_record_uses_supplied_strict_holdout(mock_score, _ready, _arrays, tmp_paths):
+    mock_score.side_effect = [
+        np.array([0.9, 0.9, 0.1]),
+        np.array([0.9, 0.1, 0.9]),
+    ]
+    record = build_model_update_record(
+        trigger="drift_detected",
+        previous_bundle={"threshold": 0.5, "model_version": "v_prev"},
+        updated_bundle={
+            "threshold": 0.5,
+            "model_version": "v_strict",
+            "evaluation_mode": "strict_temporal_holdout",
+            "strict_holdout_excluded": True,
+        },
+        model_version="v_strict",
+        tracker=tmp_paths["tracker"],
+        holdout=_explicit_holdout(),
+        holdout_excluded_from_training=True,
+    )
+    assert record["status"] == "ok"
+    assert record["holdout_excluded_from_training"] is True
+    assert record["previous_model_strict"] is False
+    assert record["updated_model_strict"] is True
+    assert record["holdout"]["hashes"] == ["h0", "h1", "h2"]
+
+
+@patch("src.evaluation.model_update.build_training_arrays", side_effect=AssertionError("split recomputed"))
+def test_model_update_record_skips_single_class_supplied_holdout(_arrays, tmp_paths):
+    record = build_model_update_record(
+        trigger="threshold_retrain",
+        previous_bundle={"threshold": 0.5},
+        updated_bundle={
+            "threshold": 0.5,
+            "model_version": "v_test",
+            "evaluation_mode": "strict_temporal_holdout",
+            "strict_holdout_excluded": True,
+        },
+        model_version="v_test",
+        tracker=tmp_paths["tracker"],
+        holdout=_explicit_holdout([1, 1, 1]),
+        holdout_excluded_from_training=True,
+    )
+    assert record["status"] == "skipped_unhealthy_holdout"
+    assert record["skip_reason"] == "single_class_holdout"
+    assert record["updated_model_strict"] is True
+
+
+@patch("src.evaluation.model_update.build_training_arrays", side_effect=AssertionError("split recomputed"))
+@patch("src.evaluation.model_update.log_model_update_summary")
+@patch("src.evaluation.model_update.append_model_update_log")
+@patch("src.evaluation.model_update.model_bundle_ready", return_value=True)
+@patch("src.evaluation.model_update.score_feature_matrix", return_value=np.array([0.9, 0.1, 0.9]))
+def test_record_model_update_comparison_persists_supplied_holdout(
+    _score, _ready, mock_append, _log, _arrays, tmp_paths
+):
+    record = record_model_update_comparison(
+        trigger="drift_detected",
+        previous_bundle=None,
+        updated_bundle={
+            "threshold": 0.5,
+            "model_version": "v_strict",
+            "evaluation_mode": "strict_temporal_holdout",
+            "strict_holdout_excluded": True,
+        },
+        model_version="v_strict",
+        tracker=tmp_paths["tracker"],
+        holdout=_explicit_holdout(),
+        holdout_excluded_from_training=True,
+    )
+    mock_append.assert_called_once()
+    assert mock_append.call_args.args[0]["holdout"]["hashes"] == ["h0", "h1", "h2"]
+    assert record["status"] == "baseline_created"
 
 
 def test_model_update_record_skips_unhealthy_holdout(tmp_paths):

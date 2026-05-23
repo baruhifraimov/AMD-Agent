@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import src.db.tracker as db
 from src.config import allow_local_benign
-from src.evaluation.model_update import record_model_update_comparison
+from src.evaluation.model_update import build_strict_temporal_holdout, record_model_update_comparison
 from src.log import PHASE_RETRAIN, get_logger, phase_log, task_status
 from src.ml.classifier import ingest_benign_corpus, load_bundle, make_model_version
 from src.ml.madar import madar_retrain
@@ -33,6 +33,8 @@ def model_retrain(state: AgentState) -> dict:
     tracker = db.get_tracker()
     if allow_local_benign():
         ingest_benign_corpus(tracker)
+    strict_holdout = build_strict_temporal_holdout(tracker)
+    holdout_hashes = set(strict_holdout.get("hashes") or [])
     rows = tracker.fetch_labeled_with_features()
 
     historical_features: list[dict] = []
@@ -45,7 +47,7 @@ def model_retrain(state: AgentState) -> dict:
         if not feats:
             continue
         sha = row["sha256"]
-        if sha in new_hashes:
+        if sha in new_hashes or sha in holdout_hashes:
             continue
         label = _valid_label(row.get("label"))
         if label is None:
@@ -57,6 +59,9 @@ def model_retrain(state: AgentState) -> dict:
     new_features: list[dict] = []
     new_labels: list[int] = []
     for item in state.new_labeled_batch:
+        sha = item.get("sha256")
+        if sha in holdout_hashes:
+            continue
         label = _valid_label(item.get("label"))
         if label is None:
             continue
@@ -71,7 +76,7 @@ def model_retrain(state: AgentState) -> dict:
     for h in new_hashes:
         tracker.update_sample_task(h, task_id)
 
-    if not new_features and state.new_labeled_batch:
+    if not new_features and not historical_features and state.new_labeled_batch:
         logger.warning(
             "[%s] MADAR retrain skipped: %s batch had %d sample(s) but none with verified labels",
             PHASE_RETRAIN,
@@ -91,10 +96,12 @@ def model_retrain(state: AgentState) -> dict:
                 new_labels,
                 historical_families=historical_families,
                 force_feature_reselection=feature_reselection,
-                init_model=previous_bundle,
+                init_model=None,
                 model_metadata={
                     "model_version": model_version,
                     "update_trigger": trigger,
+                    "strict_holdout_excluded": True,
+                    "evaluation_mode": "strict_temporal_holdout",
                 },
             )
     except ValueError as exc:
@@ -113,11 +120,12 @@ def model_retrain(state: AgentState) -> dict:
     phase_log(
         logger,
         PHASE_RETRAIN,
-        "Complete trigger=%s version=%s threshold=%.4f trained=%d",
+        "Complete trigger=%s version=%s threshold=%.4f trained=%d holdout_excluded=%d",
         trigger,
         model_version,
         bundle.get("threshold", 0.5),
         trained_count,
+        len(holdout_hashes),
     )
     record_model_update_comparison(
         trigger=trigger,
@@ -125,6 +133,8 @@ def model_retrain(state: AgentState) -> dict:
         updated_bundle=bundle,
         model_version=model_version,
         tracker=tracker,
+        holdout=strict_holdout,
+        holdout_excluded_from_training=True,
     )
 
     return {
@@ -139,6 +149,8 @@ def model_retrain(state: AgentState) -> dict:
             "replay_size": float(len(historical_features)),
             "new_batch_size": float(len(new_features)),
             "feature_reselection": 1.0 if feature_reselection else 0.0,
+            "strict_holdout_excluded": 1.0,
+            "holdout_excluded_count": float(len(holdout_hashes)),
         },
     }
 

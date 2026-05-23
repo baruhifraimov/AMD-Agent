@@ -29,9 +29,9 @@ START
 - `DriftMonitor`: uses River ADWIN over section entropy plus rolling multivariate shift checks over selected model features.
 - `ClassifierInference`: scores samples with an XGBoost-ranked, Optuna-tuned LightGBM pipeline and FPR-aware thresholding (target FPR scales with trainable benign volume in SQLite: 5% below 1k, 1% from 1k–5k, 0.1% at 5k+; see `get_dynamic_target_fpr()` in `src/config.py`).
 - `ExplainDriftContext`: asks Ollama to summarize drift statistics and anomalous static PE features into a semantic drift report (deterministic fallback when Ollama is unavailable).
-- `ModelRetrain`: retrains with MADAR replay buffer. Single-class retrain batches are skipped safely.
+- `ModelRetrain`: retrains with MADAR replay buffer, excluding the current strict temporal holdout from replay and batch training. Single-class retrain batches are skipped safely.
 - `Evaluation` (LangGraph node): runs TESSERACT chronological eval on a configurable cadence, appends `evaluation_log.jsonl`, plots decay; on retrain/drift cycles it always runs and writes `drift_log.jsonl` with pre/post metrics.
-- `ModelUpdateComparison`: after each successful cold-start or retrain update, compares the previous production model against the updated model on the same temporal holdout and appends `model_update_log.jsonl`.
+- `ModelUpdateComparison`: after each successful cold-start or retrain update, compares the previous production model against the updated model on the same strict temporal holdout and appends `model_update_log.jsonl`. Strict retrains are clean replay retrains so old weights cannot leak holdout knowledge.
 
 The initial LightGBM model is not considered ready until SQLite contains at
 least 100 active malware samples and 100 active benign samples with extracted
@@ -369,6 +369,13 @@ Report artifacts (Docker paths; local dev uses `data/`):
 | `/data/drift_log.jsonl` | Concept drift events with pre/post metrics and semantic report excerpt |
 | `/data/model_update_log.jsonl` | Per-model-update before/after metrics: accuracy, precision, recall, FPR |
 | `/data/figures/performance_decay.png` | Accuracy/FPR over evaluation runs |
+
+`model_update_log.jsonl` records `evaluation_mode`,
+`holdout_excluded_from_training`, `previous_model_strict`, and
+`updated_model_strict`. For reliable before/after model-update evidence, use
+records where `evaluation_mode="strict_temporal_holdout"` and
+`updated_model_strict=true`; older historical records remain useful for runtime
+history but may not be leakage-free.
 
 For LaTeX builds, copy or symlink the decay plot into `report/figures/performance_decay.png` after a long daemon session.
 
