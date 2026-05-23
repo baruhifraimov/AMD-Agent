@@ -25,6 +25,7 @@ from src.ml.classifier import (
 from src.ml.features import vectorize_batch
 from src.log import PHASE_RETRAIN, get_logger, phase_log, vlog
 from src.ml.replay_budget import RatioBudget, UniformBudget
+from src.ml.splits import temporal_split
 
 logger = get_logger(__name__)
 
@@ -190,7 +191,7 @@ def madar_retrain(
         X, y = X_replay, y_replay
 
     frozen: list[int] | None = None
-    existing = init_model or load_bundle()
+    existing = init_model if init_model and _bundle_feature_compatible(init_model) else None
     if not force_feature_reselection and existing and _bundle_feature_compatible(existing):
         raw = existing.get("selected_feature_indices")
         if isinstance(raw, list) and raw:
@@ -209,12 +210,35 @@ def madar_retrain(
     if init_model and _bundle_feature_compatible(init_model):
         try:
             vlog(logger, "info", "MADAR continuing training from previous bundle weights")
+            X_train, y_train, X_val, y_val, _, _ = temporal_split(
+                X,
+                y,
+                train_ratio=0.85,
+                val_ratio=0.15,
+            )
+            if len(np.unique(y_train)) < 2 or len(np.unique(y_val)) < 2:
+                raise ValueError("continuation validation split has fewer than 2 classes")
             return continue_training(
-                X, y, X, y,  # Note: normally should use validation split
+                X_train,
+                y_train,
+                X_val,
+                y_val,
                 old_bundle=init_model,
-                model_metadata=model_metadata,
+                model_metadata={
+                    **(model_metadata or {}),
+                    "training_mode": "continuation",
+                },
             )
         except Exception as exc:
             logger.warning("[%s] continue_training failed: %s; falling back to retrain_model", PHASE_RETRAIN, exc)
 
-    return retrain_model(X, y, frozen_feature_indices=frozen, model_metadata=model_metadata)
+    return retrain_model(
+        X,
+        y,
+        frozen_feature_indices=frozen,
+        model_metadata={
+            **(model_metadata or {}),
+            "training_mode": "clean_retrain",
+        },
+        reuse_existing_features=existing is not None and not force_feature_reselection,
+    )

@@ -10,6 +10,7 @@ __all__ = [
     "append_drift_log",
     "build_drift_record",
     "append_model_update_log",
+    "build_strict_temporal_holdout",
     "build_model_update_record",
     "evaluate_bundle_on_current_holdout",
     "log_model_update_summary",
@@ -33,6 +34,7 @@ def __getattr__(name: str):
         return getattr(tesseract, name)
     if name in (
         "append_model_update_log",
+        "build_strict_temporal_holdout",
         "build_model_update_record",
         "evaluate_bundle_on_current_holdout",
         "log_model_update_summary",

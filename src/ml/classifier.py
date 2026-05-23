@@ -780,6 +780,7 @@ def retrain_model(
     val_fraction: float = 0.15,
     frozen_feature_indices: list[int] | None = None,
     model_metadata: dict[str, Any] | None = None,
+    reuse_existing_features: bool = True,
 ) -> dict[str, Any] | None:
     """Retrain LightGBM with a chronological validation split."""
     if len(np.unique(y)) < 2:
@@ -810,7 +811,7 @@ def retrain_model(
         return load_bundle()
 
     frozen = frozen_feature_indices
-    if frozen is None:
+    if frozen is None and reuse_existing_features:
         existing = load_bundle()
         if existing and _bundle_feature_compatible(existing):
             raw = existing.get("selected_feature_indices")
