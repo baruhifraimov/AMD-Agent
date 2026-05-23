@@ -50,7 +50,8 @@ COPY --from=wheels /wheels /wheels
 COPY requirements.base.txt .
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install --no-index --find-links=/wheels -r requirements.base.txt \
-    && rm -rf /wheels
+    && rm -rf /wheels \
+    && python -c "import capa.main; (capa.main.get_default_root()/'sigs').mkdir(parents=True, exist_ok=True)"
 
 COPY --from=extra-wheels /extra-wheels /extra-wheels
 COPY requirements.txt .

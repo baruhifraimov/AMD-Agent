@@ -15,7 +15,7 @@ services:
       - ./tests:/app/tests:ro
       - ./data:/data
       - ./data/benign:/data/benign:ro
-      - ./capa-rules:/opt/capa-rules:ro
+      # capa-rules are baked into the image at /opt/capa-rules (v9.4.0) via Dockerfile
     cap_add:
       - NET_ADMIN
     extra_hosts:
