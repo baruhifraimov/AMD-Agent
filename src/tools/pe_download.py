@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import io
-import logging
 import time
 import zipfile
 from typing import Any
@@ -23,7 +22,9 @@ from src.sources.registry import get_registry
 from src.tools import malwarebazaar_api as mb
 from src.tools.cti_search import is_public_url
 
-logger = logging.getLogger(__name__)
+from src.log import PHASE_FETCH, get_logger, phase_log, vlog
+
+logger = get_logger(__name__)
 
 _MB_RETRIES = 3
 _MB_BACKOFF = 2.0
@@ -37,12 +38,12 @@ def download_pe_candidate(candidate: SampleCandidate) -> bytes:
         try:
             return _download_mb_with_retry(sha)
         except Exception as exc:
-            logger.info("MalwareBazaar download failed for %s: %s", sha, exc)
+            vlog(logger, "info", "MalwareBazaar download failed for %s: %s", sha, exc)
             if malshare_enabled() and mb_fallback_malshare():
                 try:
                     return _download_malshare(sha, ref)
                 except Exception as ms_exc:
-                    logger.info("MalShare fallback failed for %s: %s", sha, ms_exc)
+                    vlog(logger, "info", "MalShare fallback failed for %s: %s", sha, ms_exc)
 
     fallback = str(ref.get("fallback_url") or "").strip()
     if fallback:

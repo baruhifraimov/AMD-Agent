@@ -2,16 +2,16 @@
 
 from __future__ import annotations
 
-import logging
 from datetime import datetime, timezone
 
 import src.db.tracker as db
 from src.config import allow_local_benign
+from src.log import PHASE_RETRAIN, get_logger, phase_log, task_status
 from src.ml.classifier import ingest_benign_corpus
 from src.ml.madar import madar_retrain
 from src.state import AgentState
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 def _valid_label(label: object) -> int | None:
@@ -78,7 +78,8 @@ def model_retrain(state: AgentState) -> dict:
 
     if not new_features and state.new_labeled_batch:
         logger.warning(
-            "MADAR retrain skipped: %s batch had %d sample(s) but none with verified labels",
+            "[%s] MADAR retrain skipped: %s batch had %d sample(s) but none with verified labels",
+            PHASE_RETRAIN,
             trigger,
             len(state.new_labeled_batch),
         )
@@ -88,28 +89,29 @@ def model_retrain(state: AgentState) -> dict:
         from src.ml.classifier import load_bundle
 
         feature_reselection = _force_feature_reselection(state.drift_stats)
-        bundle = madar_retrain(
-            historical_features,
-            new_features,
-            historical_labels,
-            new_labels,
-            historical_families=historical_families,
-            force_feature_reselection=feature_reselection,
-            init_model=load_bundle(),
-        )
+        with task_status(PHASE_RETRAIN, f"MADAR retrain ({trigger})"):
+            bundle = madar_retrain(
+                historical_features,
+                new_features,
+                historical_labels,
+                new_labels,
+                historical_families=historical_families,
+                force_feature_reselection=feature_reselection,
+                init_model=load_bundle(),
+            )
     except ValueError as exc:
-        logger.warning("MADAR retrain skipped: %s", exc)
+        logger.warning("[%s] MADAR retrain skipped: %s", PHASE_RETRAIN, exc)
         return _retrain_skipped(state, historical_features, new_features, trigger)
 
     if bundle is None:
-        logger.warning("MADAR retrain skipped; no reusable model bundle is available")
+        logger.warning("[%s] MADAR retrain skipped; no reusable model bundle is available", PHASE_RETRAIN)
         return _retrain_skipped(state, historical_features, new_features, trigger)
 
-    # Mark all active featured samples as trained
     trained_count = tracker.mark_all_trained(task_id)
-    logger.info(
-        "MADAR retrain complete [trigger=%s, model_version=%s]; "
-        "threshold=%.4f, marked %d samples as trained",
+    phase_log(
+        logger,
+        PHASE_RETRAIN,
+        "Complete trigger=%s version=%s threshold=%.4f trained=%d",
         trigger,
         model_version,
         bundle.get("threshold", 0.5),

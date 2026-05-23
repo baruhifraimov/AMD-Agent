@@ -187,7 +187,15 @@ Optional secrets and endpoints (see [`.env.example`](.env.example)):
 | `AMD_OLLAMA_BASE_URL` | Ollama HTTP endpoint |
 | `AMD_OLLAMA_MODEL` | Ollama model tag (e.g. `llama3.1:8b`) |
 
-**All other tuning** (scheduler interval, bootstrap limits, drift/ADWIN, MalwareBazaar throttles, provider cooldowns, feature flags such as `ALLOW_LOCAL_BENIGN`, `PE_SOURCE_DISCOVERY_ENABLED`, `FORCED_BENIGN_PROVIDER`, Ollama timeouts, etc.) lives in [`src/config.py`](src/config.py). Edit constants there instead of `.env`.
+**All other tuning** (scheduler interval, bootstrap limits, drift/ADWIN, MalwareBazaar throttles, provider cooldowns, feature flags such as `ALLOW_LOCAL_BENIGN`, `PE_SOURCE_DISCOVERY_ENABLED`, `FORCED_BENIGN_PROVIDER`, Ollama timeouts, etc.) lives in [`src/config.py`](src/config.py). Edit constants there instead of `.env`. Settings are grouped under `# --- ... ---` section headlines (paths, ML, collection, external APIs).
+
+### Logging
+
+- **`VERBOSE`** in [`src/config.py`](src/config.py): `False` (default) prints phase-prefixed summaries on the console; `True` also prints per-item detail (skips, cache hits, API traces).
+- **Log file**: `data/logs/amd-agent.log` (local) or `/data/logs/amd-agent.log` (container). The file always retains full detail for post-mortem review; rotation is controlled by `LOG_MAX_BYTES` / `LOG_BACKUP_COUNT`.
+- **TTY spinners**: when `VERBOSE=False` and stderr is an interactive terminal, long steps show Rich status spinners; Docker/non-TTY runs use plain `[PHASE]` lines only.
+- Setup lives in [`src/log.py`](src/log.py); call `configure_logging()` once at process entry (`python -m src.graph`, preflight script).
+- **Ollama comms**: [`src/llm/ollama_trace.py`](src/llm/ollama_trace.py) logs each call with `[LLM]` lifecycle lines on the console (`sending`, `waiting`, `response OK` / `failed`). Full prompts and responses are always written to `amd-agent.log`. Set `OLLAMA_LOG_DETAIL = True` in `src/config.py` for short console previews of payloads (`OLLAMA_LOG_CONSOLE_PREVIEW` chars).
 
 Legacy search keys in an existing `.env` are ignored after this change; prune them when convenient.
 

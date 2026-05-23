@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import logging
 import random
 import re
 from urllib.parse import urljoin, urlparse
@@ -13,7 +12,9 @@ from bs4 import BeautifulSoup
 from src.config import SYSINTERNALS_BASE_URLS
 from src.sources.base import PESourceProvider, SampleCandidate
 
-logger = logging.getLogger(__name__)
+from src.log import PHASE_DISCOVERY, get_logger, phase_log, vlog
+
+logger = get_logger(__name__)
 
 _EXE_PATTERN = re.compile(r"\.exe$", re.IGNORECASE)
 
@@ -62,5 +63,5 @@ class SysinternalsProvider(PESourceProvider):
                     if _EXE_PATTERN.search(urlparse(full).path):
                         found.add(full)
             except Exception as exc:
-                logger.warning("Sysinternals listing failed for %s: %s", base_url, exc)
+                logger.warning("[%s] Sysinternals listing failed for %s: %s", PHASE_DISCOVERY, base_url, exc)
         return sorted(found)

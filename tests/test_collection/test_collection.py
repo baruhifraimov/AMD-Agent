@@ -4,6 +4,7 @@ from unittest.mock import MagicMock, patch
 
 from src.collection.context import CollectionContext
 from src.collection.discovery_chain import discover_active_malware_sources, discover_with_fallback
+from src.collection.provider_stats import summarize_discovery_providers
 from src.collection.factory import CollectionStrategyFactory
 from src.collection.strategies.bootstrap import BootstrapSelectionStrategy
 from src.collection.strategies.steady import SteadyStateSelectionStrategy
@@ -168,3 +169,15 @@ def test_active_malware_split_mb_malshare(_malshare_on, monkeypatch):
     assert len(out) == 5
     assert sum(1 for c in out if c.provider == "malwarebazaar") == 3
     assert sum(1 for c in out if c.provider == "malshare") == 2
+
+
+def test_summarize_discovery_providers():
+    assert summarize_discovery_providers([]) == "no providers"
+    summary = summarize_discovery_providers(
+        [
+            {"provider": "github", "returned": 5, "discovered": 10},
+            {"provider": "malwarebazaar", "returned": 0, "discovered": 12},
+            {"provider": "otx_pulse_cti", "error": "timeout"},
+        ]
+    )
+    assert summary == "github(5), malwarebazaar(0/12), otx_pulse_cti(error)"

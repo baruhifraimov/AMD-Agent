@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import logging
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -20,8 +19,9 @@ from src.config import (
     DRIFT_MIN_WINDOW_SAMPLES,
     ensure_dirs,
 )
+from src.log import PHASE_DRIFT, get_logger, phase_log, vlog
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class DriftMonitor:
@@ -37,7 +37,7 @@ class DriftMonitor:
         self.last_stats: dict[str, float] = state.get("last_stats", {})
 
     def _new_detector(self) -> ADWIN:
-        logger.debug("ADWIN detector delta=%.6f", ADWIN_DELTA)
+        vlog(logger, "debug", "ADWIN detector delta=%.6f", ADWIN_DELTA)
         return ADWIN(delta=ADWIN_DELTA)
 
     def _new_state(self) -> dict[str, Any]:
@@ -64,9 +64,9 @@ class DriftMonitor:
                         "observed_at": observed_at,
                         "last_stats": dict(loaded.get("last_stats", {})),
                     }
-                logger.warning("ADWIN state invalid type %s; recreating", type(loaded))
+                logger.warning("[%s] ADWIN state invalid type %s; recreating", PHASE_DRIFT, type(loaded))
             except Exception as exc:
-                logger.warning("Failed to load ADWIN state: %s", exc)
+                logger.warning("[%s] Failed to load ADWIN state: %s", PHASE_DRIFT, exc)
         return self._new_state()
 
     def save(self) -> None:
@@ -156,8 +156,10 @@ class DriftMonitor:
             or corr_shift >= DRIFT_CORR_SHIFT_THRESHOLD
         )
         if drift:
-            logger.info(
-                "Multivariate drift detected mean_shift=%.4f corr_shift=%.4f",
+            phase_log(
+                logger,
+                PHASE_DRIFT,
+                "Multivariate drift mean_shift=%.4f corr_shift=%.4f",
                 mean_shift,
                 corr_shift,
             )
@@ -173,7 +175,7 @@ class DriftMonitor:
         self.detector.update(float(value))
         entropy_drift = bool(self.detector.drift_detected)
         if entropy_drift:
-            logger.info("ADWIN drift detected at value=%.4f", value)
+            phase_log(logger, PHASE_DRIFT, "ADWIN drift detected at value=%.4f", value)
         multivariate_drift = self._multivariate_update(vector, observed_at)
         self.save()
         return entropy_drift or multivariate_drift

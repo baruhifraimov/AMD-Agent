@@ -47,6 +47,29 @@ def bump_provider(
             item[name] = int(item.get(name, 0)) + int(value or 0)
 
 
+def summarize_discovery_providers(discovery: list[dict[str, Any]]) -> str:
+    """Compact per-provider breakdown for discovery console logs."""
+    if not discovery:
+        return "no providers"
+    parts: list[str] = []
+    for item in discovery:
+        name = str(item.get("provider") or "").strip()
+        if not name:
+            continue
+        if item.get("error"):
+            parts.append(f"{name}(error)")
+            continue
+        returned = int(item.get("returned", 0) or 0)
+        discovered = int(item.get("discovered", 0) or 0)
+        if returned > 0:
+            parts.append(f"{name}({returned})")
+        elif discovered > 0:
+            parts.append(f"{name}(0/{discovered})")
+        else:
+            parts.append(f"{name}(0)")
+    return ", ".join(parts)
+
+
 def merge_discovery_stats(metrics: dict[str, Any], discovery: list[dict[str, Any]]) -> None:
     for item in discovery:
         bump_provider(

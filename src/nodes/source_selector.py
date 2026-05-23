@@ -2,16 +2,15 @@
 
 from __future__ import annotations
 
-import logging
-
 import src.db.tracker as db
 from src.collection import CollectionStrategyFactory, build_collection_context
 from src.config import IMBALANCE_ALERT_RATIO, TARGET_MALWARE_BENIGN_RATIO, ollama_source_selection_enabled
 from src.llm import choose_sources_with_ollama
+from src.log import PHASE_SELECT, get_logger, phase_log, vlog
 from src.sources.registry import get_registry
 from src.state import AgentState
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 def source_selector(state: AgentState) -> dict:
@@ -30,20 +29,30 @@ def source_selector(state: AgentState) -> dict:
         ratio = n_mal / n_ben
         if ratio < IMBALANCE_ALERT_RATIO:
             logger.warning(
-                "Class imbalance: malware=%d benign=%d ratio=%.2f (target=%.2f)"
+                "[%s] Class imbalance: malware=%d benign=%d ratio=%.2f (target=%.2f)"
                 " — too few malware, prioritising malware collection",
+                PHASE_SELECT,
                 n_mal, n_ben, ratio, TARGET_MALWARE_BENIGN_RATIO,
             )
         elif ratio > (1.0 / IMBALANCE_ALERT_RATIO):
             logger.warning(
-                "Class imbalance: malware=%d benign=%d ratio=%.2f (target=%.2f)"
+                "[%s] Class imbalance: malware=%d benign=%d ratio=%.2f (target=%.2f)"
                 " — too few benign, prioritising benign collection",
+                PHASE_SELECT,
                 n_mal, n_ben, ratio, TARGET_MALWARE_BENIGN_RATIO,
             )
     elif n_ben == 0 and n_mal > 0:
-        logger.warning("Class imbalance: %d malware, 0 benign — prioritising benign collection", n_mal)
+        logger.warning(
+            "[%s] Class imbalance: %d malware, 0 benign — prioritising benign collection",
+            PHASE_SELECT,
+            n_mal,
+        )
     elif n_mal == 0 and n_ben > 0:
-        logger.warning("Class imbalance: 0 malware, %d benign — prioritising malware collection", n_ben)
+        logger.warning(
+            "[%s] Class imbalance: 0 malware, %d benign — prioritising malware collection",
+            PHASE_SELECT,
+            n_ben,
+        )
 
     decision = None
     if ctx.phase == "steady" and selection.expected_label != -1 and ollama_source_selection_enabled():
@@ -57,10 +66,12 @@ def source_selector(state: AgentState) -> dict:
         if decision is not None:
             selected_labels = {registry.get(name).expected_label for name in decision.selected_sources}
             if len(selected_labels) != 1:
-                logger.info("Ollama selected mixed-label sources; using strategy fallback")
+                vlog(logger, "info", "Ollama selected mixed-label sources; using strategy fallback")
                 decision = None
             elif decision.expected_label != selection.expected_label:
-                logger.info(
+                vlog(
+                    logger,
+                    "info",
                     "Ollama selected label=%d while strategy requires label=%d; using strategy",
                     decision.expected_label,
                     selection.expected_label,
@@ -82,6 +93,15 @@ def source_selector(state: AgentState) -> dict:
         collection_phase = selection.collection_phase
         route_hint = selection.route_hint
 
+    phase_log(
+        logger,
+        PHASE_SELECT,
+        "Phase=%s label=%d sources=%s strategy=%s",
+        collection_phase,
+        expected_label,
+        ",".join(selected_sources) or source_type,
+        discovery_strategy,
+    )
     return {
         "source_type": source_type,
         "selected_sources": selected_sources,

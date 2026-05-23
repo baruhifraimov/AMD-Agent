@@ -2,16 +2,16 @@
 
 from __future__ import annotations
 
-import logging
-
 import src.db.tracker as db
 from src.collection.context import CollectionContext, build_collection_context
 from src.config import BENIGN_PROVIDER_NAMES, MALWARE_FALLBACK_PROVIDERS, PE_FETCH_LIMIT, malshare_enabled
+from src.collection.provider_stats import summarize_discovery_providers
+from src.log import PHASE_DISCOVERY, get_logger, phase_log, vlog
 from src.tools.malwarebazaar_api import reset_mb_run_budget
 from src.sources.base import SampleCandidate
 from src.sources.registry import SourceRegistry, get_registry
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 def _known_bad_or_downloaded(candidate: SampleCandidate, tracker: db.MalwareTracker) -> bool:
@@ -166,7 +166,7 @@ def discover_active_malware_sources(
     
             )
         except Exception as exc:
-            logger.warning("Discovery failed for provider=%s: %s", provider_name, exc)
+            logger.warning("[%s] Discovery failed for provider=%s: %s", PHASE_DISCOVERY, provider_name, exc)
             if stats is not None:
                 stats.append(
                     {
@@ -295,7 +295,7 @@ def discover_active_benign_sources(
                 tracker=tracker,
             )
         except Exception as exc:
-            logger.warning("Discovery failed for provider=%s: %s", provider_name, exc)
+            logger.warning("[%s] Discovery failed for provider=%s: %s", PHASE_DISCOVERY, provider_name, exc)
             if stats is not None:
                 stats.append(
                     {
@@ -464,7 +464,7 @@ def discover_with_fallback(
     
             )
         except Exception as exc:
-            logger.warning("Discovery failed for provider=%s: %s", provider_name, exc)
+            logger.warning("[%s] Discovery failed for provider=%s: %s", PHASE_DISCOVERY, provider_name, exc)
             if stats is not None:
                 stats.append(
                     {
@@ -500,7 +500,9 @@ def discover_with_fallback(
                     "phase": ctx.phase,
                 }
             )
-        logger.info(
+        vlog(
+            logger,
+            "info",
             "Discovered %d/%d fresh candidates from provider=%s label=%d returned=%d/%d",
             fresh,
             len(discovered),
@@ -510,4 +512,13 @@ def discover_with_fallback(
             fetch_limit,
         )
 
+    phase_log(
+        logger,
+        PHASE_DISCOVERY,
+        "Fallback chain done: %d/%d candidates (label=%d) via %s",
+        len(candidates),
+        fetch_limit,
+        expected_label,
+        summarize_discovery_providers(stats or []),
+    )
     return candidates[:fetch_limit]

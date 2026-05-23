@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import logging
 from typing import Any
 
 import numpy as np
@@ -11,9 +10,10 @@ from src.config import FEATURE_NAMES
 from src.ml.classifier import load_bundle, model_bundle_ready
 from src.ml.drift import DriftMonitor
 from src.ml.features import features_to_vector
+from src.log import get_logger, vlog
 from src.ml.services.ground_truth import GroundTruthResolver
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class DriftMonitorService:
@@ -45,7 +45,9 @@ class DriftMonitorService:
             any_drift = True
             label = self.resolver.resolve_label(sha, meta)
             if label is None:
-                logger.info(
+                vlog(
+                    logger,
+                    "info",
                     "Drift sample %s skipped: no verified label in DB or metadata",
                     sha[:12] if sha else "?",
                 )

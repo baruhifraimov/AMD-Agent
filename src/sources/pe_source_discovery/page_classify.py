@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-import logging
 import re
 from typing import Any
 from urllib.parse import urlparse
 
-logger = logging.getLogger(__name__)
+from src.log import PHASE_DISCOVERY, get_logger, phase_log, vlog
+
+logger = get_logger(__name__)
 
 _DATASET_RE = re.compile(
     r"\b(dataset|malware sample|benign|goodware|PE files?|windows executables?|"
@@ -121,10 +122,16 @@ def refine_with_llm(url: str, text: str, heuristic: dict[str, Any]) -> dict[str,
             "(malware_only|benign_only|mixed|meta_index|none), access_type, "
             "automation_level, label_quality, provider_name."
         )
-        response = model.invoke([("system", prompt), ("human", text[:2000])])
+        from src.llm.ollama_trace import invoke_chat
+
+        response = invoke_chat(
+            model,
+            [("system", prompt), ("human", text[:2000])],
+            operation="pe_source_classify",
+        )
         parsed = _json_from_text(str(getattr(response, "content", "")))
         if isinstance(parsed, dict):
             return {**heuristic, **{k: v for k, v in parsed.items() if v is not None}}
     except Exception as exc:
-        logger.debug("LLM PE source classify skipped: %s", exc)
+        vlog(logger, "debug", "LLM PE source classify skipped: %s", exc)
     return heuristic

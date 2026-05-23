@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import io
-import logging
 import zipfile
 from typing import Any
 
@@ -12,7 +11,9 @@ import httpx
 from src.config import GITHUB_API_URL, GITHUB_BENIGN_REPOS, get_github_token
 from src.sources.base import PESourceProvider, SampleCandidate
 
-logger = logging.getLogger(__name__)
+from src.log import PHASE_DISCOVERY, get_logger, phase_log, vlog
+
+logger = get_logger(__name__)
 
 DISCOVERABLE_ASSET_SUFFIXES = (".exe", ".zip")
 PE_ARCHIVE_SUFFIXES = (".exe", ".dll", ".sys", ".scr")
@@ -30,7 +31,7 @@ class GitHubReleasesProvider(PESourceProvider):
             try:
                 assets = self._list_release_assets(owner, repo)
             except Exception as exc:
-                logger.warning("GitHub discover failed %s/%s: %s", owner, repo, exc)
+                logger.warning("[%s] GitHub discover failed %s/%s: %s", PHASE_DISCOVERY, owner, repo, exc)
                 continue
             for asset in assets:
                 if len(candidates) >= limit:
@@ -41,7 +42,7 @@ class GitHubReleasesProvider(PESourceProvider):
                     continue
                 lower = name.lower()
                 if not lower.endswith(DISCOVERABLE_ASSET_SUFFIXES):
-                    logger.debug("Skipping non-PE asset: %s", name)
+                    vlog(logger, "debug", "Skipping non-PE asset: %s", name)
                     continue
                 candidates.append(
                     SampleCandidate(

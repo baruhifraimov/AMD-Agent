@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import ipaddress
-import logging
 import re
 import time
 from urllib.parse import urlparse
@@ -18,8 +17,9 @@ from src.config import (
     CTI_PAGE_MAX_BYTES,
     CTI_REQUEST_TIMEOUT,
 )
+from src.log import PHASE_DISCOVERY, get_logger, vlog
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 _host_blocklist: dict[str, float] = {}
 
@@ -60,7 +60,7 @@ def _record_host_failure(url: str, status_code: int | None) -> None:
     else:
         ttl = CTI_HOST_BLOCK_SECONDS_TRANSPORT
     _host_blocklist[host] = time.monotonic() + ttl
-    logger.info("CTI host blocklisted %s for %.0fs (status=%s)", host, ttl, status_code)
+    vlog(logger, "info", "CTI host blocklisted %s for %.0fs (status=%s)", host, ttl, status_code)
 
 
 def fetch_public_text(url: str) -> str:
@@ -68,7 +68,7 @@ def fetch_public_text(url: str) -> str:
     if not is_public_url(url):
         return ""
     if _host_blocked(url):
-        logger.debug("CTI fetch skipped (host blocklisted): %s", _host_key(url))
+        vlog(logger, "debug", "CTI fetch skipped (host blocklisted): %s", _host_key(url))
         return ""
     content = bytearray()
     try:
@@ -86,14 +86,14 @@ def fetch_public_text(url: str) -> str:
         status = exc.response.status_code
         if status in (403, 429):
             _record_host_failure(url, status)
-        logger.warning("CTI page fetch failed for %s: %s", url, exc)
+        logger.warning("[%s] CTI page fetch failed for %s: %s", PHASE_DISCOVERY, url, exc)
         return ""
     except httpx.TransportError as exc:
         _record_host_failure(url, None)
-        logger.warning("CTI page fetch failed for %s: %s", url, exc)
+        logger.warning("[%s] CTI page fetch failed for %s: %s", PHASE_DISCOVERY, url, exc)
         return ""
     except Exception as exc:
-        logger.warning("CTI page fetch failed for %s: %s", url, exc)
+        logger.warning("[%s] CTI page fetch failed for %s: %s", PHASE_DISCOVERY, url, exc)
         return ""
     soup = BeautifulSoup(bytes(content), "html.parser")
     for tag in soup(["script", "style", "noscript"]):

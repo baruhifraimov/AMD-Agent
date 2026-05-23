@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import logging
 from collections import Counter
 from typing import Any
 
@@ -24,9 +23,10 @@ from src.ml.classifier import (
     retrain_model,
 )
 from src.ml.features import vectorize_batch
+from src.log import PHASE_RETRAIN, get_logger, phase_log, vlog
 from src.ml.replay_budget import RatioBudget, UniformBudget
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 def select_family_replay(
@@ -195,22 +195,24 @@ def madar_retrain(
         if isinstance(raw, list) and raw:
             frozen = [int(i) for i in raw]
 
-    logger.info(
+    phase_log(
+        logger,
+        PHASE_RETRAIN,
         "MADAR retrain: replay=%d new=%d total=%d feature_reselection=%s",
         len(replay_idx),
         len(new_batch),
         len(y),
         force_feature_reselection,
     )
-    
+
     if init_model and _bundle_feature_compatible(init_model):
         try:
-            logger.info("MADAR continuing training from previous bundle weights")
+            vlog(logger, "info", "MADAR continuing training from previous bundle weights")
             return continue_training(
                 X, y, X, y,  # Note: normally should use validation split
                 old_bundle=init_model,
             )
         except Exception as exc:
-            logger.warning("MADAR continue_training failed: %s; falling back to retrain_model", exc)
+            logger.warning("[%s] continue_training failed: %s; falling back to retrain_model", PHASE_RETRAIN, exc)
 
     return retrain_model(X, y, frozen_feature_indices=frozen)

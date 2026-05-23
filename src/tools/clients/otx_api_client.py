@@ -2,14 +2,15 @@
 
 from __future__ import annotations
 
-import logging
 import re
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from src.tools.clients.http_client_base import CircuitBreaker, HttpApiClient
 
-logger = logging.getLogger(__name__)
+from src.log import PHASE_API, get_logger, phase_log, vlog
+
+logger = get_logger(__name__)
 
 OTX_API_BASE = "https://otx.alienvault.com/api/v1/"
 SHA256_RE = re.compile(r"^[a-fA-F0-9]{64}$")
@@ -48,7 +49,7 @@ class OTXApiClient(HttpApiClient):
             )
             payload = response.json()
         except Exception as exc:
-            logger.warning("OTX pulse fetch failed: %s", exc)
+            logger.warning("[%s] OTX pulse fetch failed: %s", PHASE_API, exc)
             return []
 
         results_list = payload.get("results") or []
@@ -106,6 +107,6 @@ class OTXApiClient(HttpApiClient):
             if len(pulses) >= limit:
                 break
 
-        logger.info("OTX fetched %d pulse(s) with %d total hashes",
+        vlog(logger, "info", "OTX fetched %d pulse(s) with %d total hashes",
                      len(pulses), sum(len(p["sha256_hashes"]) for p in pulses))
         return pulses
