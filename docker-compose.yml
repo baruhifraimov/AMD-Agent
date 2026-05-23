@@ -15,6 +15,7 @@ services:
       - ./tests:/app/tests:ro
       - ./data:/data
       - ./data/benign:/data/benign:ro
+      - ./capa-rules:/opt/capa-rules:ro
     cap_add:
       - NET_ADMIN
     extra_hosts:
