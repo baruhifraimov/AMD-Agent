@@ -29,7 +29,7 @@ def _force_feature_reselection(drift_stats: dict[str, float]) -> bool:
 
 def model_retrain(state: AgentState) -> dict:
     trigger = "drift_detected" if state.drift_detected else "threshold_retrain"
-    model_version = _make_model_version()
+    model_version = make_model_version()
     retrain_count = count_retrains() + 1
 
     tracker = db.get_tracker()

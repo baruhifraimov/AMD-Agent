@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from src.config import FALLBACK_PE_CHECK_MULT
 from src.log import PHASE_DISCOVERY, get_logger, phase_log, task_status, vlog
 from src.sources.base import PESourceProvider, SampleCandidate
@@ -9,6 +11,19 @@ from src.tools import malwarebazaar_api as mb
 from src.tools import threatfox_api as tf
 
 logger = get_logger(__name__)
+
+_PE_TAGS = frozenset({"exe", "dll", "sys", "scr", "peexe", "pedll", "pe"})
+_WIN_PREFIXES = ("win.", "win32.", "win64.")
+
+
+def _is_likely_pe(item: dict[str, Any]) -> bool:
+    """True if ThreatFox IOC metadata strongly signals a Windows PE file."""
+    tags = {t.lower() for t in (item.get("tags") or [])}
+    if tags & _PE_TAGS:
+        return True
+    malware = (item.get("malware") or "").lower()
+    threat_type = (item.get("threat_type") or "").lower()
+    return any(malware.startswith(p) for p in _WIN_PREFIXES) and threat_type == "payload"
 
 
 class ThreatFoxProvider(PESourceProvider):
@@ -25,18 +40,21 @@ class ThreatFoxProvider(PESourceProvider):
                 if not sha:
                     continue
                 checked += 1
-                if not mb.malwarebazaar_available():
+                if _is_likely_pe(item):
+                    vlog(logger, "debug", "ThreatFox %s: PE via tags/family, skipping MB check", sha)
+                elif not mb.malwarebazaar_available():
                     logger.warning("[%s] MB circuit open; aborting ThreatFox PE checks", PHASE_DISCOVERY)
                     break
-                try:
-                    if not mb.is_pe_hash(sha):
+                else:
+                    try:
+                        if not mb.is_pe_hash(sha):
+                            continue
+                    except mb.MalwareBazaarUnavailable:
+                        logger.warning("[%s] MB circuit open; aborting ThreatFox PE checks", PHASE_DISCOVERY)
+                        break
+                    except Exception as exc:
+                        vlog(logger, "debug", "ThreatFox skip %s (MB is_pe_hash): %s", sha, exc)
                         continue
-                except mb.MalwareBazaarUnavailable:
-                    logger.warning("[%s] MB circuit open; aborting ThreatFox PE checks", PHASE_DISCOVERY)
-                    break
-                except Exception as exc:
-                    vlog(logger, "debug", "ThreatFox skip %s (MB is_pe_hash): %s", sha, exc)
-                    continue
                 candidates.append(
                     SampleCandidate(
                         external_id=sha,

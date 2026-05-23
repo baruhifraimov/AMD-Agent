@@ -78,6 +78,7 @@ class ThreatFoxClient(HttpApiClient):
                     "malware": row.get("malware_printable") or row.get("malware") or "",
                     "first_seen": row.get("first_seen") or "",
                     "threat_type": row.get("threat_type") or "",
+                    "tags": [str(t) for t in (row.get("tags") or []) if isinstance(t, str)],
                 }
             )
             if len(results) >= limit:

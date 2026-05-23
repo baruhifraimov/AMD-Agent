@@ -18,6 +18,7 @@ from src.config import (
     OLLAMA_MODEL,
     OLLAMA_TIMEOUT,
     REPORT_LANGUAGE,
+    ollama_drift_context_report_enabled,
     ollama_source_selection_enabled,
 )
 from src.llm.ollama_trace import invoke_chat
@@ -354,6 +355,9 @@ def summarize_drift_context(
     hash_metadata: dict[str, dict[str, Any]] | None = None,
 ) -> str:
     """Produce a short drift narrative from statistics and static PE features."""
+    if not ollama_drift_context_report_enabled():
+        return ""
+
     avg_entropy = _average([float(f.get("avg_section_entropy", 0.0)) for f in feature_vectors])
     fallback = _drift_context_fallback(drift_stats, feature_vectors, avg_entropy)
 

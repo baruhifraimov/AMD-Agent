@@ -20,5 +20,12 @@ def test_fallback_pe_check_mult_default():
 
 
 def test_scheduler_defaults():
-    assert config.SCHED_INTERVAL_SECONDS == 1800
+    assert config.SCHED_INTERVAL_SECONDS == 300
+    assert config.SCHED_JITTER_SECONDS == 30
+    assert config.SCHED_MAX_BACKOFF_SECONDS == 600
     assert config.SCHED_MAX_RUNS is None
+
+
+def test_ollama_drift_context_report_enabled_default():
+    assert config.OLLAMA_DRIFT_CONTEXT_REPORT_ENABLED is True
+    assert config.ollama_drift_context_report_enabled() is True

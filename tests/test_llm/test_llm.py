@@ -9,6 +9,7 @@ from src.llm.client import (
     _coerce_source_decision,
     _json_from_text,
     semantic_filter_hashes,
+    summarize_drift_context,
 )
 
 SHA = "a" * 64
@@ -67,6 +68,18 @@ def test_semantic_filter_fallback(monkeypatch):
     monkeypatch.setattr("src.llm.client._chat_model", lambda: None)
     result = semantic_filter_hashes(ITEMS)
     assert result[0]["semantic_reason"] == "keyword match fallback"
+
+
+def test_summarize_drift_context_disabled(monkeypatch):
+    monkeypatch.setattr("src.llm.client.ollama_drift_context_report_enabled", lambda: False)
+    monkeypatch.setattr("src.llm.client._chat_model", lambda: MagicMock())
+    assert (
+        summarize_drift_context(
+            {"mean_shift": 1.0},
+            [{"sha256": SHA, "avg_section_entropy": 5.0}],
+        )
+        == ""
+    )
 
 
 def test_semantic_filter_rejects_hash(monkeypatch):
