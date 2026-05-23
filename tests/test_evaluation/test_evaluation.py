@@ -1,0 +1,121 @@
+"""TESSERACT evaluation and evaluation node."""
+
+import json
+from unittest.mock import patch
+
+import numpy as np
+
+from src.config import FEATURE_DIM, FEATURE_NAMES, FEATURE_SET_VERSION
+from src.evaluation.tesseract import append_eval_log, plot_performance_decay, run_tesseract_eval
+from src.nodes.evaluation_node import evaluation_node
+from src.state import AgentState
+
+
+def _features(value: float) -> dict[str, float]:
+    return {name: value for name in FEATURE_NAMES}
+
+
+@patch("src.evaluation.tesseract.compute_aut", return_value=0.75)
+@patch("src.evaluation.tesseract.score_feature_matrix")
+@patch("src.evaluation.tesseract.fit_model_artifact")
+@patch(
+    "src.evaluation.tesseract.load_bundle",
+    return_value={
+        "model": object(),
+        "training_counts": {"0": 100, "1": 100},
+        "feature_set_version": FEATURE_SET_VERSION,
+        "feature_dim": FEATURE_DIM,
+        "feature_names": FEATURE_NAMES,
+    },
+)
+def test_run_tesseract_eval_writes_aut(mock_bundle, mock_fit, mock_score, mock_aut, tmp_paths):
+    tracker = tmp_paths["tracker"]
+    for i in range(20):
+        sha = f"{i:064x}"
+        tracker.insert_sample(
+            sha,
+            f"/tmp/{sha}.bin",
+            f"2024-01-{i + 1:02d} 00:00:00",
+            features=_features(float(i)),
+            label=i % 2,
+        )
+    mock_fit.return_value = {"model": object(), "threshold": 0.5}
+    mock_score.side_effect = lambda bundle, X: np.linspace(0.0, 1.0, len(X))
+    assert run_tesseract_eval(tracker)["aut"] == 0.75
+
+
+def test_training_order_uses_ingested_at(tmp_paths):
+    tracker = tmp_paths["tracker"]
+    benign_sha, malware_sha = "b" * 64, "c" * 64
+    tracker.insert_sample(
+        malware_sha,
+        f"/tmp/{malware_sha}.bin",
+        "2020-01-01 00:00:00",
+        features=_features(1.0),
+        label=1,
+        ingested_at="2024-01-02 00:00:00",
+    )
+    tracker.insert_sample(
+        benign_sha,
+        f"/tmp/{benign_sha}.bin",
+        "2024-01-01 00:00:00",
+        features=_features(0.0),
+        label=0,
+        ingested_at="2024-01-01 00:00:00",
+    )
+    rows = tracker.fetch_labeled_with_features()
+    assert [r["sha256"] for r in rows] == [benign_sha, malware_sha]
+
+
+def test_plot_performance_decay_uses_figures_dir(tmp_path, tmp_paths):
+    from src.config import FIGURES_DIR
+
+    append_eval_log({"accuracy": 0.9, "fpr": 0.01})
+    out_path = plot_performance_decay()
+    assert out_path == FIGURES_DIR / "performance_decay.png"
+    assert out_path.exists()
+
+
+@patch("src.evaluation.tesseract.run_tesseract_eval")
+def test_evaluation_node_skips_before_interval(mock_eval, tmp_path):
+    from src.config import EVAL_STATE_PATH
+
+    EVAL_STATE_PATH.write_text(json.dumps({"runs": 6}), encoding="utf-8")
+    with patch("src.nodes.evaluation_node.EVAL_EVERY_RUNS", 10):
+        evaluation_node(AgentState(collection_phase="steady"))
+    assert json.loads(EVAL_STATE_PATH.read_text())["runs"] == 7
+    mock_eval.assert_not_called()
+
+
+@patch("src.evaluation.tesseract.run_retrograde_eval", return_value={})
+@patch("src.evaluation.tesseract.plot_performance_decay")
+@patch("src.evaluation.tesseract.append_eval_log")
+@patch("src.evaluation.tesseract.run_tesseract_eval", return_value={"accuracy": 0.91, "fpr": 0.002})
+def test_evaluation_node_runs_on_interval(mock_eval, mock_append, mock_plot, _retro, tmp_path):
+    from src.config import EVAL_STATE_PATH
+
+    EVAL_STATE_PATH.write_text(json.dumps({"runs": 9}), encoding="utf-8")
+    with patch("src.nodes.evaluation_node.EVAL_EVERY_RUNS", 10):
+        out = evaluation_node(AgentState(collection_phase="steady"))
+    assert out["evaluation_metrics"]["accuracy"] == 0.91
+    mock_eval.assert_called_once()
+
+
+@patch("src.nodes.evaluation_node.append_drift_log")
+@patch("src.evaluation.tesseract.plot_performance_decay")
+@patch("src.evaluation.tesseract.append_eval_log")
+@patch("src.evaluation.tesseract.run_tesseract_eval", return_value={"accuracy": 0.88, "fpr": 0.003})
+def test_evaluation_node_logs_drift_when_pending(
+    mock_eval, mock_append, mock_plot, mock_drift_log
+):
+    out = evaluation_node(
+        AgentState(
+            pending_drift_log=True,
+            drift_pre_metrics={"accuracy": 0.8},
+            drift_stats={"mean_shift": 1.2},
+            evaluation_metrics={"retrained": 1.0},
+        )
+    )
+    assert out["pending_drift_log"] is False
+    record = mock_drift_log.call_args[0][0]
+    assert record["pre_metrics"]["accuracy"] == 0.8

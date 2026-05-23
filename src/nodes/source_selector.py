@@ -104,7 +104,6 @@ def source_selector(state: AgentState) -> dict:
         "pending_drift_log": False,
         "hash_metadata": {},
         "rejected_candidates": [],
-        "capa_results": {},
         "cti_evidence": {},
         "intel_poll_stats": {},
         "intel_sources_polled": [],

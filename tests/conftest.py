@@ -1,13 +1,34 @@
-"""Pytest fixtures."""
+"""Pytest fixtures and collection guards (no pytest.ini — invoke ``pytest tests/``)."""
 
 from __future__ import annotations
 
 import io
+import sys
 import zipfile
 from pathlib import Path
 
 import pyzipper
 import pytest
+
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+_TESTS_ROOT = Path(__file__).resolve().parent
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
+# When pytest is run from repo root with no path args, skip non-test trees.
+_SKIP_COLLECT_DIRS = frozenset(
+    {"src", "scripts", "data", "graphify-out", "report", "docker", "research"}
+)
+
+
+def pytest_ignore_collect(collection_path, config):
+    path = Path(collection_path)
+    if path.name in _SKIP_COLLECT_DIRS or path.name.startswith("."):
+        return True
+    if path.is_file() and path.name.startswith("test_") and _TESTS_ROOT not in path.parents:
+        return True
+    return False
+
 
 from src.config import DB_PATH, MODEL_PATH, ADWIN_PATH, SANDBOX_DIR
 

@@ -165,17 +165,13 @@ OTX_PULSE_LIMIT = 10
 OTX_PULSE_MAX_HASHES = 30
 IMBALANCE_ALERT_RATIO = 0.5
 
-# Explainability (local: edit CAPA_RULES_DIR for your capa-rules checkout)
+# Explainability (drift narrative via Ollama)
 OLLAMA_TIMEOUT = 8.0
-CAPA_RULES_DIR = Path("/opt/capa-rules")
 REPORT_LANGUAGE = "English"
 
 # --- Secrets and deployment endpoints (from environment only) ---
 OLLAMA_BASE_URL = os.getenv("AMD_OLLAMA_BASE_URL").strip()
 OLLAMA_MODEL = os.getenv("AMD_OLLAMA_MODEL").strip()
-
-if _in_container:
-    CAPA_RULES_DIR = Path("/opt/capa-rules")
 
 # Sysinternals benign source
 SYSINTERNALS_BASE_URLS = (

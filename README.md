@@ -1,6 +1,6 @@
 # AMD-Agent: Autonomous Continual Malware Detection
 
-AMD-Agent is a LangGraph-based malware analysis pipeline for collecting Windows PE samples, extracting static features, detecting concept drift, explaining suspicious drift with capa + Ollama, and retraining a LightGBM classifier with MADAR replay.
+AMD-Agent is a LangGraph-based malware analysis pipeline for collecting Windows PE samples, extracting static features, detecting concept drift, explaining suspicious drift with Ollama and static PE features, and retraining a LightGBM classifier with MADAR replay.
 
 The project is designed for isolated execution in Docker or a malware-analysis VM. Do not run downloaded binaries.
 
@@ -28,7 +28,7 @@ START
 - `FeatureExtraction`: extracts a deterministic 2304-dimensional EMBER-like static vector: PE headers/directories, Authenticode metadata, warnings, byte and byte-entropy histograms, string distributions, hashed imports/exports/sections, and lightweight instruction features. Parse failures are triaged and marked `corrupted`.
 - `DriftMonitor`: uses River ADWIN over section entropy plus rolling multivariate shift checks over selected model features.
 - `ClassifierInference`: scores samples with an XGBoost-ranked, Optuna-tuned LightGBM pipeline and FPR-aware thresholding (target FPR scales with trainable benign volume in SQLite: 5% below 1k, 1% from 1k–5k, 0.1% at 5k+; see `get_dynamic_target_fpr()` in `src/config.py`).
-- `ExplainDriftContext`: runs `capa -j -r <rules_dir>` and asks Ollama to produce a semantic drift report.
+- `ExplainDriftContext`: asks Ollama to summarize drift statistics and anomalous static PE features into a semantic drift report (deterministic fallback when Ollama is unavailable).
 - `ModelRetrain`: retrains with MADAR replay buffer. Single-class retrain batches are skipped safely.
 - `Evaluation` (LangGraph node): runs TESSERACT chronological eval on a configurable cadence, appends `evaluation_log.jsonl`, plots decay; on retrain/drift cycles it always runs and writes `drift_log.jsonl` with pre/post metrics.
 
@@ -119,23 +119,15 @@ OTX and curated CTI fallback can validate hashes and load pending malware rows w
 - MalwareBazaar API key.
 - AlienVault OTX API key when `otx_pulse_cti` is enabled.
 - Ollama running locally for source choice, structured CTI parsing, and drift reports.
-- capa rules directory:
-  - Docker build clones official `capa-rules` into `/opt/capa-rules`.
-  - Local runs need `CAPA_RULES_DIR` in `src/config.py` pointing to a valid rules directory.
 
-Python dependencies are split for Docker cache stability:
-
-- `requirements.base.txt`: heavy/stable project dependencies.
-- `requirements.txt`: includes the base file for local installs and is the place to add new project dependencies.
-
-Docker installs `requirements.base.txt` in a stable cached layer first. New direct dependencies added to `requirements.txt` are installed in a later small layer, so the base dependency set is not reinstalled.
+All Python dependencies live in `requirements.txt`. Local installs and Docker both use `pip install -r requirements.txt`. Any change to that file invalidates the Docker dependency wheel layer on rebuild.
 
 Installed dependencies include:
 
 - `langgraph`, `pydantic`
 - `langchain-ollama`, `langchain-core`
 - `httpx`, `beautifulsoup4`, `OTXv2`
-- `pefile`, `pyzipper`, `flare-capa`
+- `pefile`, `pyzipper`
 - `river`, `lightgbm`, `scikit-learn`
 - `xgboost`, `optuna`, `capstone`
 - `numpy`, `pandas`, `joblib`, `matplotlib`
@@ -195,7 +187,7 @@ Optional secrets and endpoints (see [`.env.example`](.env.example)):
 | `AMD_OLLAMA_BASE_URL` | Ollama HTTP endpoint |
 | `AMD_OLLAMA_MODEL` | Ollama model tag (e.g. `llama3.1:8b`) |
 
-**All other tuning** (scheduler interval, bootstrap limits, drift/ADWIN, MalwareBazaar throttles, provider cooldowns, feature flags such as `ALLOW_LOCAL_BENIGN`, `PE_SOURCE_DISCOVERY_ENABLED`, `FORCED_BENIGN_PROVIDER`, capa rules path for local dev, etc.) lives in [`src/config.py`](src/config.py). Edit constants there instead of `.env`.
+**All other tuning** (scheduler interval, bootstrap limits, drift/ADWIN, MalwareBazaar throttles, provider cooldowns, feature flags such as `ALLOW_LOCAL_BENIGN`, `PE_SOURCE_DISCOVERY_ENABLED`, `FORCED_BENIGN_PROVIDER`, Ollama timeouts, etc.) lives in [`src/config.py`](src/config.py). Edit constants there instead of `.env`.
 
 Legacy search keys in an existing `.env` are ignored after this change; prune them when convenient.
 
@@ -276,13 +268,6 @@ Run daemon:
 
 ```powershell
 python -m src.graph --daemon
-```
-
-Local capa setup example:
-
-```powershell
-git clone https://github.com/mandiant/capa-rules.git C:\capa-rules
-# Edit CAPA_RULES_DIR in src/config.py, e.g. Path(r"C:\capa-rules")
 ```
 
 ## Malware CTI Fallback
@@ -372,7 +357,7 @@ Report artifacts (Docker paths; local dev uses `data/`):
 |------|---------|
 | `/data/evaluation_log.jsonl` | Per-run TESSERACT metrics (accuracy, FPR, AUT) |
 | `/data/evaluation_state.json` | Persistent counter for periodic evaluation cadence |
-| `/data/drift_log.jsonl` | Concept drift events with pre/post metrics and capa excerpt |
+| `/data/drift_log.jsonl` | Concept drift events with pre/post metrics and semantic report excerpt |
 | `/data/figures/performance_decay.png` | Accuracy/FPR over evaluation runs |
 
 For LaTeX builds, copy or symlink the decay plot into `report/figures/performance_decay.png` after a long daemon session.
@@ -386,10 +371,20 @@ For LaTeX builds, copy or symlink the decay plot into `report/figures/performanc
 
 ## Tests
 
-Run:
+Layout mirrors `src/` packages (`tests/test_workflow/`, `tests/test_collection/`, …). Shared fixtures live in `tests/conftest.py`.
+
+Run the full suite (always pass the `tests/` directory — no `pytest.ini`):
 
 ```powershell
-python -m pytest -q
+python -m pytest tests/ -q
+docker compose run --rm amd-agent pytest tests/ -q
+```
+
+Run one package:
+
+```powershell
+python -m pytest tests/test_ml/ -q
+docker compose run --rm amd-agent pytest tests/test_workflow/ -q
 ```
 
 Fast static check:
@@ -427,9 +422,8 @@ curl.exe http://localhost:11434/api/tags
 ```
 
 - `AMD_OLLAMA_MODEL` matches an installed Ollama model.
-- `CAPA_RULES_DIR` in `config.py` points to a real capa rules directory for local runs.
 - `data/benign` contains enough benign PE files, or live benign providers are reachable.
-- `python -m pytest -q` works after dependencies are installed.
+- `python -m pytest tests/ -q` works after dependencies are installed.
 
 ## Troubleshooting
 
@@ -461,15 +455,6 @@ Start Docker Desktop, then rerun:
 
 ```powershell
 docker compose build
-```
-
-### capa rules missing locally
-
-Clone rules and set env:
-
-```powershell
-git clone https://github.com/mandiant/capa-rules.git C:\capa-rules
-# Edit CAPA_RULES_DIR in src/config.py, e.g. Path(r"C:\capa-rules")
 ```
 
 ### SQLite locked

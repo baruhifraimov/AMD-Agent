@@ -21,5 +21,6 @@ AGENTS.md
 data/
 
 report/
-
-capa-rules/
+research/
+.chunkhound*
+.vscode/

@@ -339,54 +339,76 @@ def triage_pe_error(sha256: str, path: str, error: str, metadata: dict[str, Any]
     return "reject"
 
 
-def summarize_capa_findings(
-    capa_results: dict[str, dict[str, Any]],
+def summarize_drift_context(
+    drift_stats: dict[str, float],
     feature_vectors: list[dict[str, Any]],
+    hash_metadata: dict[str, dict[str, Any]] | None = None,
 ) -> str:
+    """Produce a short drift narrative from statistics and static PE features."""
     avg_entropy = _average([float(f.get("avg_section_entropy", 0.0)) for f in feature_vectors])
-    if not capa_results:
-        return (
-            "Drift detected. capa did not produce usable findings. "
-            f"Batch size={len(feature_vectors)}, mean section entropy={avg_entropy:.4f}."
-        )
+    fallback = _drift_context_fallback(drift_stats, feature_vectors, avg_entropy)
 
     model = _chat_model()
-    compact = {
-        sha: _compact_capa_json(result)
-        for sha, result in list(capa_results.items())[:5]
-    }
     if model is None:
-        rules = sorted(
-            {
-                rule
-                for result in compact.values()
-                for rule in result.get("rules", [])
-            }
-        )
-        return (
-            "Drift detected. capa identified capabilities: "
-            f"{', '.join(rules[:12]) if rules else 'no named rules extracted'}. "
-            f"Batch size={len(feature_vectors)}, mean section entropy={avg_entropy:.4f}."
-        )
+        return fallback
 
     prompt = (
-        f"Write a concise malware drift explanation in {REPORT_LANGUAGE}. "
-        "Use the capa capabilities and anomalous PE features. Focus on new malware "
-        "capabilities and why retraining is justified. Avoid overstating certainty."
+        f"Write a concise malware concept-drift explanation in {REPORT_LANGUAGE}. "
+        "Use the drift statistics and anomalous PE static features. Explain why the "
+        "feature distribution shifted and why model retraining is justified. "
+        "Avoid overstating certainty."
     )
-    payload = {"capa": compact, "feature_vectors": feature_vectors[:10]}
+    payload = {
+        "drift_stats": drift_stats,
+        "feature_summary": _compact_feature_summary(feature_vectors, hash_metadata),
+    }
     try:
         response = model.invoke([("system", prompt), ("human", json.dumps(payload))])
         content = str(getattr(response, "content", "")).strip()
         if content:
             return content
     except Exception as exc:
-        logger.info("Ollama capa summarization failed; using fallback: %s", exc)
+        logger.info("Ollama drift summarization failed; using fallback: %s", exc)
+    return fallback
+
+
+def _drift_context_fallback(
+    drift_stats: dict[str, float],
+    feature_vectors: list[dict[str, Any]],
+    avg_entropy: float,
+) -> str:
+    stats_bits = ", ".join(f"{k}={v:.4g}" for k, v in sorted(drift_stats.items()) if v is not None)
     return (
-        "Drift detected. capa produced findings for "
-        f"{len(capa_results)} sample(s). Batch size={len(feature_vectors)}, "
-        f"mean section entropy={avg_entropy:.4f}."
+        "Concept drift detected. "
+        f"Statistics: {stats_bits or 'n/a'}. "
+        f"Batch size={len(feature_vectors)}, mean section entropy={avg_entropy:.4f}."
     )
+
+
+def _compact_feature_summary(
+    feature_vectors: list[dict[str, Any]],
+    hash_metadata: dict[str, dict[str, Any]] | None,
+) -> list[dict[str, Any]]:
+    keys = (
+        "sha256",
+        "avg_section_entropy",
+        "num_sections",
+        "has_debug",
+        "has_imports",
+        "has_exports",
+        "has_authenticode",
+    )
+    out: list[dict[str, Any]] = []
+    for fv in feature_vectors[:10]:
+        sha = str(fv.get("sha256", ""))
+        row = {k: fv[k] for k in keys if k in fv}
+        if hash_metadata and sha in hash_metadata:
+            meta = hash_metadata[sha]
+            for mk in ("label", "malware_family", "signature", "provider"):
+                if mk in meta:
+                    row[mk] = meta[mk]
+        out.append(row)
+    return out
 
 
 def _looks_malware_context(context: str) -> bool:
@@ -398,18 +420,3 @@ def _looks_malware_context(context: str) -> bool:
 
 def _average(values: list[float]) -> float:
     return sum(values) / len(values) if values else 0.0
-
-
-def _compact_capa_json(result: dict[str, Any]) -> dict[str, Any]:
-    rules_obj = result.get("rules") or {}
-    if isinstance(rules_obj, dict):
-        rules = list(rules_obj.keys())[:20]
-    elif isinstance(rules_obj, list):
-        rules = [str(item) for item in rules_obj[:20]]
-    else:
-        rules = []
-    meta = result.get("meta") if isinstance(result.get("meta"), dict) else {}
-    return {
-        "rules": rules,
-        "sample": meta.get("sample") or meta.get("analysis") or {},
-    }

@@ -14,7 +14,7 @@ class AgentState(BaseModel):
     drift_detected: bool = False
     threshold_retrain: bool = False
     new_labeled_batch: List[Dict[str, Any]] = Field(default_factory=list)
-    evaluation_metrics: Dict[str, float] = Field(default_factory=dict)
+    evaluation_metrics: Dict[str, Any] = Field(default_factory=dict)
     semantic_report: Optional[str] = None
 
     source_type: str = ""
@@ -26,7 +26,6 @@ class AgentState(BaseModel):
     expected_label: int = 1
     sample_candidates: List[Dict[str, Any]] = Field(default_factory=list)
     rejected_candidates: List[Dict[str, Any]] = Field(default_factory=list)
-    capa_results: Dict[str, Dict[str, Any]] = Field(default_factory=dict)
 
     hash_metadata: Dict[str, Dict[str, Any]] = Field(default_factory=dict)
     section_entropies: List[float] = Field(default_factory=list)
