@@ -13,8 +13,9 @@ from src.state import AgentState
 
 logger = logging.getLogger(__name__)
 
-CAPA_TIMEOUT_SECONDS = 180
+CAPA_TIMEOUT_SECONDS = 300
 CAPA_SAMPLE_LIMIT = 3
+CAPA_MAX_FILE_BYTES = 10 * 1024 * 1024  # 10 MB
 
 
 def explain_drift_context(state: AgentState) -> dict:
@@ -22,6 +23,11 @@ def explain_drift_context(state: AgentState) -> dict:
     for path in state.downloaded_paths[:CAPA_SAMPLE_LIMIT]:
         sha = Path(path).stem.lower()
         if sha in capa_results:
+            continue
+        size = Path(path).stat().st_size if Path(path).exists() else 0
+        if size > CAPA_MAX_FILE_BYTES:
+            logger.info("capa skipped %s: file too large (%d MB)", sha[:16], size // (1024 * 1024))
+            capa_results[sha] = {"error": f"skipped: file too large ({size // (1024*1024)} MB)"}
             continue
         capa_results[sha] = _run_capa(path)
 
