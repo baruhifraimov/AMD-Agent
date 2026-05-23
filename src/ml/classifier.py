@@ -73,7 +73,22 @@ def load_bundle(path: Path | None = None) -> dict[str, Any] | None:
 
 def _save_bundle_dict(bundle: dict[str, Any], path: Path | None = None) -> None:
     ensure_dirs()
-    joblib.dump(bundle, path or MODEL_PATH)
+    target_path = path or MODEL_PATH
+    
+    # MADAR model archiving
+    if target_path.exists():
+        from src.config import MODEL_ARCHIVE_DEPTH
+        if MODEL_ARCHIVE_DEPTH > 0:
+            import shutil
+            for i in range(MODEL_ARCHIVE_DEPTH - 1, 0, -1):
+                src = target_path.with_name(f"{target_path.stem}_archive_{i-1}{target_path.suffix}")
+                dst = target_path.with_name(f"{target_path.stem}_archive_{i}{target_path.suffix}")
+                if src.exists():
+                    shutil.move(str(src), str(dst))
+            first_archive = target_path.with_name(f"{target_path.stem}_archive_0{target_path.suffix}")
+            shutil.copy2(str(target_path), str(first_archive))
+            
+    joblib.dump(bundle, target_path)
 
 
 def save_bundle(
@@ -208,6 +223,7 @@ def _fit_lightgbm(
     feature_names: list[str],
     X_val: np.ndarray | None = None,
     y_val: np.ndarray | None = None,
+    init_model: lgb.LGBMClassifier | str | None = None,
 ) -> lgb.LGBMClassifier:
     train_frame = _feature_frame(X_train, feature_names)
     if (
@@ -222,9 +238,10 @@ def _fit_lightgbm(
             y_train,
             eval_set=[(val_frame, y_val)],
             callbacks=[lgb.early_stopping(20, verbose=False)],
+            init_model=init_model,
         )
         return model
-    model.fit(train_frame, y_train)
+    model.fit(train_frame, y_train, init_model=init_model)
     return model
 
 
@@ -437,6 +454,71 @@ def fit_model_artifact(
     if bootstrap_sanity_metrics is not None:
         bundle["bootstrap_sanity_metrics"] = bootstrap_sanity_metrics
     return bundle
+
+
+def continue_training(
+    X_train: np.ndarray,
+    y_train: np.ndarray,
+    X_val: np.ndarray,
+    y_val: np.ndarray,
+    *,
+    old_bundle: dict[str, Any],
+) -> dict[str, Any]:
+    """Continue training existing LightGBM model without retraining from scratch."""
+    from src.config import CONTINUATION_TREES, MAX_TOTAL_TREES
+    
+    if len(np.unique(y_train)) < 2:
+        raise ValueError("training split has fewer than 2 classes")
+        
+    old_model = old_bundle["model"]
+    selected = old_bundle.get("selected_feature_indices") or list(range(X_train.shape[1]))
+    selected_names = old_bundle.get("selected_feature_names") or [FEATURE_NAMES[i] for i in selected]
+    
+    X_train_sel = _apply_selected(X_train, selected)
+    X_val_sel = _apply_selected(X_val, selected) if len(y_val) else np.empty((0, len(selected)))
+    
+    # Keep old params but expand trees
+    old_params = old_model.get_params()
+    current_trees = old_model.booster_.num_trees() if hasattr(old_model, "booster_") else old_params.get("n_estimators", 150)
+    
+    new_estimators = min(current_trees + CONTINUATION_TREES, MAX_TOTAL_TREES)
+    
+    params = old_params.copy()
+    params["n_estimators"] = new_estimators
+    
+    model = lgb.LGBMClassifier(**params)
+    _fit_lightgbm(
+        model,
+        X_train_sel,
+        y_train,
+        feature_names=selected_names,
+        X_val=X_val_sel if len(y_val) else None,
+        y_val=y_val if len(y_val) else None,
+        init_model=old_model,
+    )
+    
+    val_scores = predict_proba(model, X_val_sel, feature_names=selected_names) if len(y_val) else np.array([])
+    threshold = fit_threshold(y_val, val_scores) if len(y_val) else old_bundle.get("threshold", 0.5)
+    threshold_meta = _split_metadata(
+        split_mode="temporal_continuation",
+        y_train=y_train,
+        y_val=y_val,
+    )
+    
+    bundle: dict[str, Any] = {
+        "model": model,
+        "threshold": threshold,
+        "feature_names": FEATURE_NAMES,
+        "feature_set_version": FEATURE_SET_VERSION,
+        "feature_dim": FEATURE_DIM,
+        "selected_feature_indices": selected,
+        "selected_feature_names": selected_names,
+        "optuna_best_params": params,
+        "split_metadata": threshold_meta,
+    }
+    
+    _save_bundle_dict(bundle)
+    return load_bundle() or bundle
 
 
 def _score_matrix(bundle: dict[str, Any], X: np.ndarray) -> np.ndarray:

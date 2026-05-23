@@ -122,6 +122,61 @@ def run_tesseract_eval(
     return metrics
 
 
+def run_retrograde_eval(tracker: db.MalwareTracker | None = None) -> dict[str, float]:
+    """MADAR Retrograde Evaluation across all historical tasks."""
+    tracker = tracker or db.get_tracker()
+    task_ids = tracker.get_all_task_ids()
+    if not task_ids:
+        return {}
+        
+    production_bundle = load_bundle()
+    if not model_bundle_ready(production_bundle):
+        return {}
+        
+    metrics = {}
+    total_acc = 0.0
+    total_samples = 0
+    
+    for task_id in task_ids:
+        rows = tracker.fetch_task_holdout(task_id)
+        if not rows:
+            continue
+            
+        X_list = []
+        y_list = []
+        for row in rows:
+            feats = row.get("features")
+            if not feats:
+                continue
+            from src.ml.features import features_to_vector
+            X_list.append(features_to_vector(feats))
+            y_list.append(int(row["label"]))
+            
+        if not X_list:
+            continue
+            
+        X = np.vstack(X_list)
+        y = np.array(y_list, dtype=int)
+        
+        threshold = float(production_bundle.get("threshold", 0.5))
+        test_scores = score_feature_matrix(production_bundle, X)
+        y_pred = (test_scores >= threshold).astype(int)
+        
+        task_metrics = compute_metrics(y, y_pred)
+        
+        for k, v in task_metrics.items():
+            metrics[f"task_{task_id}_{k}"] = v
+            
+        acc = task_metrics.get("accuracy", 0.0)
+        total_acc += acc * len(y)
+        total_samples += len(y)
+        
+    if total_samples > 0:
+        metrics["retrograde_accuracy"] = total_acc / total_samples
+        
+    return metrics
+
+
 def append_eval_log(metrics: dict[str, float], path: Path | None = None) -> None:
     cfg.ensure_dirs()
     p = path or cfg.EVAL_LOG_PATH

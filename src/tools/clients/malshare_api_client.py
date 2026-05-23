@@ -3,31 +3,18 @@
 from __future__ import annotations
 
 import logging
-import os
 from typing import Any
 
+from src.config import get_malshare_api_key, malshare_enabled
 from src.tools.clients.http_client_base import ApiUnavailable, HttpApiClient
 
 logger = logging.getLogger(__name__)
 
 MALSHARE_API_URL = "https://malshare.com/api.php"
-MALSHARE_KEY_ENV = "MALSHARE_API_KEY"
-MALSHARE_ENABLED_ENV = "AMD_MALSHARE_ENABLED"
 
 
 class MalShareUnavailable(ApiUnavailable):
     """Raised when MalShare is disabled or unavailable."""
-
-
-def malshare_enabled() -> bool:
-    return os.getenv(MALSHARE_ENABLED_ENV, "0").strip() in ("1", "true", "yes")
-
-
-def get_malshare_api_key() -> str:
-    key = os.getenv(MALSHARE_KEY_ENV, "").strip()
-    if not key:
-        raise ValueError(f"Missing {MALSHARE_KEY_ENV} environment variable")
-    return key
 
 
 class MalShareClient(HttpApiClient):
@@ -43,7 +30,7 @@ class MalShareClient(HttpApiClient):
     @classmethod
     def from_config(cls) -> MalShareClient:
         if not malshare_enabled():
-            raise MalShareUnavailable("MalShare is disabled (set AMD_MALSHARE_ENABLED=1)")
+            raise MalShareUnavailable("MalShare is disabled (set MALSHARE_ENABLED=True in src/config.py)")
         return cls()
 
     def _params(self, extra: dict[str, str]) -> dict[str, str]:

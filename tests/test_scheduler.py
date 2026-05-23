@@ -1,14 +1,16 @@
 """Tests for scheduler configuration and loop."""
 
 from pathlib import Path
+from unittest.mock import patch
 
 from src.runtime.scheduler import SchedulerConfig, SchedulerLoop, load_scheduler_config
 
 
-def test_scheduler_config_from_env(monkeypatch):
-    monkeypatch.setenv("AMD_SCHED_INTERVAL", "120")
-    monkeypatch.setenv("AMD_SCHED_MAX_RUNS", "3")
-    cfg = SchedulerConfig.from_env()
+def test_scheduler_config_from_config():
+    with patch("src.config.SCHED_INTERVAL_SECONDS", 120), patch(
+        "src.config.SCHED_MAX_RUNS", 3
+    ):
+        cfg = SchedulerConfig.from_config()
     assert cfg.interval_seconds == 120
     assert cfg.max_runs == 3
 

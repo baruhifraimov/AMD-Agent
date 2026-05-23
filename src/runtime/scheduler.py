@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import os
 import random
 import time
 from pathlib import Path
@@ -11,6 +10,8 @@ from typing import Callable
 
 import yaml
 from pydantic import BaseModel, Field
+
+from src import config
 
 logger = logging.getLogger(__name__)
 
@@ -25,31 +26,20 @@ class SchedulerConfig(BaseModel):
     max_backoff_seconds: int = Field(default=3600, ge=1)
 
     @classmethod
-    def from_env(cls) -> SchedulerConfig:
-        def _int(name: str, default: int) -> int:
-            raw = os.getenv(name, "")
-            return int(raw) if raw.strip() else default
-
-        def _optional_int(name: str) -> int | None:
-            raw = os.getenv(name, "")
-            if not raw.strip():
-                return None
-            return int(raw)
-
+    def from_config(cls) -> SchedulerConfig:
         return cls(
-            enabled=os.getenv("AMD_SCHED_ENABLED", "").strip() in ("1", "true", "yes"),
-            interval_seconds=_int("AMD_SCHED_INTERVAL", 1800),
-            max_runs=_optional_int("AMD_SCHED_MAX_RUNS"),
-            run_on_start=os.getenv("AMD_SCHED_RUN_ON_START", "1").strip()
-            not in ("0", "false", "no"),
-            jitter_seconds=_int("AMD_SCHED_JITTER", 60),
-            error_backoff_seconds=_int("AMD_SCHED_ERROR_BACKOFF", 60),
-            max_backoff_seconds=_int("AMD_SCHED_MAX_BACKOFF", 3600),
+            enabled=config.SCHED_ENABLED,
+            interval_seconds=config.SCHED_INTERVAL_SECONDS,
+            max_runs=config.SCHED_MAX_RUNS,
+            run_on_start=config.SCHED_RUN_ON_START,
+            jitter_seconds=config.SCHED_JITTER_SECONDS,
+            error_backoff_seconds=config.SCHED_ERROR_BACKOFF_SECONDS,
+            max_backoff_seconds=config.SCHED_MAX_BACKOFF_SECONDS,
         )
 
 
 def load_scheduler_config(path: Path | None = None) -> SchedulerConfig:
-    cfg = SchedulerConfig.from_env()
+    cfg = SchedulerConfig.from_config()
     if path is None or not path.exists():
         return cfg
     with path.open() as f:

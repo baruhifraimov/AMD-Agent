@@ -8,13 +8,13 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 from typing import Any
 
 from pydantic import BaseModel, Field
 
 from src.config import (
     OLLAMA_BASE_URL,
+    OLLAMA_ENABLED,
     OLLAMA_MODEL,
     OLLAMA_TIMEOUT,
     REPORT_LANGUAGE,
@@ -33,7 +33,7 @@ class SourceDecision(BaseModel):
 
 
 def _ollama_disabled() -> bool:
-    return os.getenv("AMD_OLLAMA_ENABLED", "1").strip().lower() in {"0", "false", "no"}
+    return not OLLAMA_ENABLED
 
 
 def _chat_model() -> Any | None:

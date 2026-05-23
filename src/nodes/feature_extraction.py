@@ -63,6 +63,8 @@ def feature_extraction(state: AgentState) -> dict:
         vectors.append(feats)
         entropies.append(float(feats.get("avg_section_entropy", 0.0)))
         update_features(tracker, sha, feats)
+        if "malware_family" in meta:
+            tracker.update_family(sha, meta["malware_family"])
         bump_provider(metrics, str(meta.get("source_provider") or ""), meta.get("expected_label"), feature_extracted=1)
         candidate_key = str(meta.get("candidate_key") or "")
         if candidate_key:

@@ -54,7 +54,7 @@ def test_route_after_selector(mock_ctx):
     ) == "source_discovery"
 
 
-@patch("src.graph.pe_source_discovery_enabled", return_value=False)
+@patch("src.graph.PE_SOURCE_DISCOVERY_ENABLED", False)
 def test_route_after_selector_pe_discovery_disabled(_mock_pe):
     from src.collection.context import CollectionContext
 
@@ -74,7 +74,7 @@ def test_route_after_selector_pe_discovery_disabled(_mock_pe):
         )
 
 
-@patch("src.graph.pe_source_discovery_enabled", return_value=True)
+@patch("src.graph.PE_SOURCE_DISCOVERY_ENABLED", True)
 @patch("src.graph.PESourceStore")
 def test_route_pe_source_discovery_when_sparse(mock_store, _mock_enabled):
     mock_store.return_value.count_active.return_value = 0

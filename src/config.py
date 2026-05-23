@@ -8,7 +8,6 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 # MalwareBazaar API
 API_URL = "https://mb-api.abuse.ch/api/v1/"
 ZIP_PASSWORD = "infected"
-AUTH_KEY_ENV = "MALWAREBAZAAR_AUTH_KEY"
 
 # Sandbox: container vs local dev
 _in_container = Path("/data").exists() and os.getenv("AMD_AGENT_CONTAINER") == "1"
@@ -33,11 +32,10 @@ else:
     DRIFT_LOG_PATH = PROJECT_ROOT / "data" / "drift_log.jsonl"
     FIGURES_DIR = PROJECT_ROOT / "report" / "figures"
 
-REPLAY_BUDGET = 2000
+REPLAY_BUDGET = 3000
 MIN_TRAIN_MALWARE = 100
 MIN_TRAIN_BENIGN = 100
-PE_FETCH_LIMIT_ENV = "AMD_PE_FETCH_LIMIT"
-PE_FETCH_LIMIT = int(os.getenv(PE_FETCH_LIMIT_ENV, "10"))
+PE_FETCH_LIMIT = 10
 TARGET_FPR = 0.001
 FEATURE_SET_VERSION = "ember_static_v1"
 FEATURE_DIM = 2304
@@ -46,144 +44,113 @@ FEATURE_DIM = 2304
 MIN_BENIGN_FOR_FPR = MIN_TRAIN_BENIGN
 TARGET_MALWARE_BENIGN_RATIO = 1.0
 BENIGN_PROVIDER_NAMES = ("sysinternals", "github", "benign_net")
-MALSHARE_API_KEY_ENV = "MALSHARE_API_KEY"
-MALSHARE_ENABLED_ENV = "AMD_MALSHARE_ENABLED"
-MB_FALLBACK_MALSHARE_ENV = "AMD_MB_FALLBACK_MALSHARE"
-BENIGN_NET_REPO_URL_ENV = "BENIGN_NET_REPO_URL"
-BENIGN_NET_MAX_DISCOVER_ENV = "BENIGN_NET_MAX_DISCOVER"
-PE_SOURCE_DISCOVERY_ENV = "AMD_PE_SOURCE_DISCOVERY"
-PE_DISCOVERY_MAX_URLS_ENV = "AMD_PE_DISCOVERY_MAX_URLS_PER_RUN"
-MIN_PE_SOURCES_ENV = "MIN_PE_SOURCES"
-ALLOW_LOCAL_BENIGN_ENV = "AMD_ALLOW_LOCAL_BENIGN"
-INTEL_MIN_POLL_INTERVAL_ENV = "AMD_INTEL_MIN_POLL_INTERVAL"
-INTEL_MAX_POLL_INTERVAL_ENV = "AMD_INTEL_MAX_POLL_INTERVAL"
-CTI_SEED_SOURCES_ENABLED_ENV = "AMD_CTI_SEED_SOURCES_ENABLED"
-CTI_DOWNLOAD_ALLOWLIST_ENV = "AMD_CTI_DOWNLOAD_ALLOWLIST"
-CTI_SEARCH_BACKENDS_ENV = "AMD_CTI_SEARCH_BACKENDS"
-BRAVE_SEARCH_API_KEY_ENV = "AMD_BRAVE_SEARCH_API_KEY"
-MALWARE_FALLBACK_PROVIDERS_ENV = "AMD_MALWARE_FALLBACK_PROVIDERS"
-FALLBACK_PE_CHECK_MULT_ENV = "AMD_FALLBACK_PE_CHECK_MULT"
-PE_DOWNLOAD_MAX_BYTES_ENV = "AMD_PE_DOWNLOAD_MAX_BYTES"
-OLLAMA_SOURCE_SELECTION_ENV = "AMD_OLLAMA_SOURCE_SELECTION"
-OLLAMA_BASE_URL_ENV = "AMD_OLLAMA_BASE_URL"
-OLLAMA_MODEL_ENV = "AMD_OLLAMA_MODEL"
-OLLAMA_TIMEOUT_ENV = "AMD_OLLAMA_TIMEOUT"
-CAPA_RULES_DIR_ENV = "AMD_CAPA_RULES_DIR"
-REPORT_LANGUAGE_ENV = "AMD_REPORT_LANGUAGE"
-ADWIN_DELTA_ENV = "AMD_ADWIN_DELTA"
-FEATURE_SELECTION_K_ENV = "AMD_FEATURE_SELECTION_K"
-OPTUNA_TRIALS_ENV = "AMD_OPTUNA_TRIALS"
-OPTUNA_TIMEOUT_ENV = "AMD_OPTUNA_TIMEOUT"
-DRIFT_WINDOW_DAYS_ENV = "AMD_DRIFT_WINDOW_DAYS"
-DRIFT_MIN_WINDOW_SAMPLES_ENV = "AMD_DRIFT_MIN_WINDOW_SAMPLES"
-REPLAY_FRACTION_ENV = "AMD_REPLAY_FRACTION"
-EVAL_EVERY_RUNS_ENV = "AMD_EVAL_EVERY_RUNS"
-EVAL_SKIP_BOOTSTRAP_ENV = "AMD_EVAL_SKIP_BOOTSTRAP"
-MB_CIRCUIT_FAILURE_THRESHOLD_ENV = "AMD_MB_CIRCUIT_FAILURE_THRESHOLD"
-MB_CIRCUIT_OPEN_SECONDS_ENV = "AMD_MB_CIRCUIT_OPEN_SECONDS"
-MB_CIRCUIT_OPEN_SECONDS_429_ENV = "AMD_MB_CIRCUIT_OPEN_SECONDS_429"
-MB_MIN_REQUEST_INTERVAL_ENV = "AMD_MB_MIN_REQUEST_INTERVAL"
-MB_USER_AGENT_ENV = "AMD_MB_USER_AGENT"
-MB_USER_AGENT_CONTACT_ENV = "AMD_MB_USER_AGENT_CONTACT"
-MB_INFO_CACHE_TTL_DAYS_ENV = "AMD_MB_INFO_CACHE_TTL_DAYS"
-MB_DAILY_DOWNLOAD_LIMIT_ENV = "AMD_MB_DAILY_DOWNLOAD_LIMIT"
-MB_MAX_INFO_CALLS_PER_RUN_ENV = "AMD_MB_MAX_INFO_CALLS_PER_RUN"
-CTI_HOST_BLOCK_SECONDS_403_ENV = "AMD_CTI_HOST_BLOCK_SECONDS_403"
-CTI_HOST_BLOCK_SECONDS_429_ENV = "AMD_CTI_HOST_BLOCK_SECONDS_429"
-CTI_HOST_BLOCK_SECONDS_TRANSPORT_ENV = "AMD_CTI_HOST_BLOCK_SECONDS_TRANSPORT"
-PROVIDER_COOLDOWN_ZERO_RUNS_ENV = "AMD_PROVIDER_COOLDOWN_ZERO_RUNS"
-PROVIDER_COOLDOWN_SECONDS_ENV = "AMD_PROVIDER_COOLDOWN_SECONDS"
-PROVIDER_COOLDOWN_MIN_ATTEMPTS_ENV = "AMD_PROVIDER_COOLDOWN_MIN_ATTEMPTS"
-STEADY_BENIGN_EVERY_N_ENV = "AMD_STEADY_BENIGN_EVERY_N"
-TESSERACT_MIXED_UNTIL_HEALTHY_ENV = "AMD_TESSERACT_MIXED_UNTIL_HEALTHY"
 
+# --- Application defaults (edit here; not loaded from .env) ---
 
-def cti_seed_sources_enabled() -> bool:
-    return os.getenv(CTI_SEED_SOURCES_ENABLED_ENV, "1").strip() not in ("0", "false", "no")
+# Scheduler (`python -m src.graph --daemon`)
+SCHED_ENABLED = False
+SCHED_INTERVAL_SECONDS = 1800
+SCHED_MAX_RUNS: int | None = None
+SCHED_RUN_ON_START = True
+SCHED_JITTER_SECONDS = 60
+SCHED_ERROR_BACKOFF_SECONDS = 60
+SCHED_MAX_BACKOFF_SECONDS = 3600
 
+# Bootstrap (`python -m src.graph --bootstrap`)
+BOOTSTRAP_MAX_RUNS = 60
+BOOTSTRAP_INTERVAL_SECONDS = 10
 
-def ollama_source_selection_enabled() -> bool:
-    return os.getenv(OLLAMA_SOURCE_SELECTION_ENV, "1").strip() not in ("0", "false", "no")
+# Feature flags
+ALLOW_LOCAL_BENIGN = False
+MALSHARE_ENABLED = False
+MB_FALLBACK_MALSHARE = False
+PE_SOURCE_DISCOVERY_ENABLED = False
+CTI_SEED_SOURCES_ENABLED = True
+OLLAMA_ENABLED = True
+OLLAMA_SOURCE_SELECTION_ENABLED = True
+FORCED_BENIGN_PROVIDER: str | None = None
 
+# MADAR / model continuation
+MADAR_CONTAMINATION = 0.1
+MADAR_ANOMALOUS_RATIO = 0.5
+MADAR_CLASS_RATIO = 0.5
+MADAR_BUDGET_STRATEGY = "ratio"
+CONTINUATION_TREES = 50
+MAX_TOTAL_TREES = 500
+MODEL_ARCHIVE_DEPTH = 5
 
-def eval_skip_bootstrap() -> bool:
-    return os.getenv(EVAL_SKIP_BOOTSTRAP_ENV, "1").strip() not in ("0", "false", "no")
+# Drift / ML tuning
+ADWIN_DELTA = 0.002
+DRIFT_WINDOW_DAYS = 60
+DRIFT_MIN_WINDOW_SAMPLES = 50
+REPLAY_FRACTION = 0.3  # DEPRECATED
+FEATURE_SELECTION_K = 384
+OPTUNA_TRIALS = 25
+OPTUNA_TIMEOUT = 300
 
+# Evaluation (TESSERACT)
+EVAL_EVERY_RUNS = 10
+EVAL_SKIP_BOOTSTRAP = True
+TESSERACT_MIXED_UNTIL_HEALTHY = True
 
-def tesseract_mixed_until_healthy() -> bool:
-    return os.getenv(TESSERACT_MIXED_UNTIL_HEALTHY_ENV, "1").strip() not in ("0", "false", "no")
+# Intel polling / provider cooldown
+INTEL_MIN_POLL_INTERVAL = 60
+INTEL_MAX_POLL_INTERVAL = 3600
+PROVIDER_COOLDOWN_ZERO_RUNS = 3
+PROVIDER_COOLDOWN_SECONDS = 43200
+PROVIDER_COOLDOWN_MIN_ATTEMPTS = 5
+STEADY_BENIGN_EVERY_N = 4
 
-
-CTI_SEED_SOURCES_ENABLED = cti_seed_sources_enabled()
-INTEL_MIN_POLL_INTERVAL = int(os.getenv(INTEL_MIN_POLL_INTERVAL_ENV, "60"))
-INTEL_MAX_POLL_INTERVAL = int(os.getenv(INTEL_MAX_POLL_INTERVAL_ENV, "3600"))
-PROVIDER_COOLDOWN_ZERO_RUNS = max(1, int(os.getenv(PROVIDER_COOLDOWN_ZERO_RUNS_ENV, "3")))
-PROVIDER_COOLDOWN_SECONDS = max(60, int(os.getenv(PROVIDER_COOLDOWN_SECONDS_ENV, "43200")))
-PROVIDER_COOLDOWN_MIN_ATTEMPTS = max(1, int(os.getenv(PROVIDER_COOLDOWN_MIN_ATTEMPTS_ENV, "5")))
-STEADY_BENIGN_EVERY_N = max(1, int(os.getenv(STEADY_BENIGN_EVERY_N_ENV, "4")))
-TESSERACT_MIXED_UNTIL_HEALTHY = tesseract_mixed_until_healthy()
-
-# Local LLM / explainability
-OLLAMA_BASE_URL = os.getenv(OLLAMA_BASE_URL_ENV, "http://localhost:11434").strip()
-OLLAMA_MODEL = os.getenv(OLLAMA_MODEL_ENV, "llama3.1:8b").strip()
-OLLAMA_TIMEOUT = float(os.getenv(OLLAMA_TIMEOUT_ENV, "8"))
-CAPA_RULES_DIR = Path(os.getenv(CAPA_RULES_DIR_ENV, "/opt/capa-rules")).expanduser()
-REPORT_LANGUAGE = os.getenv(REPORT_LANGUAGE_ENV, "English").strip() or "English"
-ADWIN_DELTA = float(os.getenv(ADWIN_DELTA_ENV, "0.002"))
-FEATURE_SELECTION_K = int(os.getenv(FEATURE_SELECTION_K_ENV, "384"))
-OPTUNA_TRIALS = int(os.getenv(OPTUNA_TRIALS_ENV, "25"))
-OPTUNA_TIMEOUT = int(os.getenv(OPTUNA_TIMEOUT_ENV, "300"))
-DRIFT_WINDOW_DAYS = int(os.getenv(DRIFT_WINDOW_DAYS_ENV, "60"))
-DRIFT_MIN_WINDOW_SAMPLES = int(os.getenv(DRIFT_MIN_WINDOW_SAMPLES_ENV, "50"))
-REPLAY_FRACTION = float(os.getenv(REPLAY_FRACTION_ENV, "0.3"))
-EVAL_EVERY_RUNS = max(1, int(os.getenv(EVAL_EVERY_RUNS_ENV, "10")))
-EVAL_SKIP_BOOTSTRAP = eval_skip_bootstrap()
-MB_CIRCUIT_FAILURE_THRESHOLD = int(os.getenv(MB_CIRCUIT_FAILURE_THRESHOLD_ENV, "3"))
-MB_CIRCUIT_OPEN_SECONDS = float(os.getenv(MB_CIRCUIT_OPEN_SECONDS_ENV, "120"))
-MB_CIRCUIT_OPEN_SECONDS_429 = float(os.getenv(MB_CIRCUIT_OPEN_SECONDS_429_ENV, "3600"))
-MB_MIN_REQUEST_INTERVAL = float(os.getenv(MB_MIN_REQUEST_INTERVAL_ENV, "1.5"))
+# MalwareBazaar fair-use
+MB_CIRCUIT_FAILURE_THRESHOLD = 3
+MB_CIRCUIT_OPEN_SECONDS = 120.0
+MB_CIRCUIT_OPEN_SECONDS_429 = 3600.0
+MB_MIN_REQUEST_INTERVAL = 1.5
 MB_USER_AGENT = (
-    os.getenv(
-        MB_USER_AGENT_ENV,
-        "AMD-Agent/1.0 (malware-ml-research; contact via MALWAREBAZAAR_AUTH_KEY holder)",
-    ).strip()
-    or "AMD-Agent/1.0 (malware-ml-research)"
+    "AMD-Agent/1.0 (malware-ml-research; contact via MALWAREBAZAAR_AUTH_KEY holder)"
 )
-MB_USER_AGENT_CONTACT = os.getenv(MB_USER_AGENT_CONTACT_ENV, "").strip()
-MB_INFO_CACHE_TTL_DAYS = max(1, int(os.getenv(MB_INFO_CACHE_TTL_DAYS_ENV, "30")))
-MB_DAILY_DOWNLOAD_LIMIT = max(1, int(os.getenv(MB_DAILY_DOWNLOAD_LIMIT_ENV, "1900")))
-MB_MAX_INFO_CALLS_PER_RUN = max(0, int(os.getenv(MB_MAX_INFO_CALLS_PER_RUN_ENV, "0")))
-CTI_HOST_BLOCK_SECONDS_403 = float(os.getenv(CTI_HOST_BLOCK_SECONDS_403_ENV, "900"))
-CTI_HOST_BLOCK_SECONDS_429 = float(os.getenv(CTI_HOST_BLOCK_SECONDS_429_ENV, "3600"))
-CTI_HOST_BLOCK_SECONDS_TRANSPORT = float(
-    os.getenv(CTI_HOST_BLOCK_SECONDS_TRANSPORT_ENV, "300")
-)
-_raw_malware_fallbacks = os.getenv(MALWARE_FALLBACK_PROVIDERS_ENV)
-MALWARE_FALLBACK_PROVIDERS = tuple(
-    p.strip().lower()
-    for p in (
-        _raw_malware_fallbacks
-        if _raw_malware_fallbacks is not None
-        else "malshare,threatfox,dynamic_cti"
-    ).split(",")
-    if p.strip()
-)
-FALLBACK_PE_CHECK_MULT = max(1, int(os.getenv(FALLBACK_PE_CHECK_MULT_ENV, "1")))
+MB_USER_AGENT_CONTACT = ""
+MB_INFO_CACHE_TTL_DAYS = 30
+MB_DAILY_DOWNLOAD_LIMIT = 1900
+MB_MAX_INFO_CALLS_PER_RUN = 0
 
-# Dynamic CTI discovery limits
-CTI_SEARCH_LIMIT = int(os.getenv("AMD_CTI_SEARCH_LIMIT", "5"))
-CTI_SEARCH_BACKENDS = os.getenv(CTI_SEARCH_BACKENDS_ENV, "duckduckgo").strip() or "duckduckgo"
-BRAVE_SEARCH_API_KEY = os.getenv(BRAVE_SEARCH_API_KEY_ENV, "").strip()
-CTI_PAGE_LIMIT = int(os.getenv("AMD_CTI_PAGE_LIMIT", "5"))
-CTI_PAGE_MAX_BYTES = int(os.getenv("AMD_CTI_PAGE_MAX_BYTES", "250000"))
-CTI_REQUEST_TIMEOUT = float(os.getenv("AMD_CTI_REQUEST_TIMEOUT", "20"))
-PE_DOWNLOAD_MAX_BYTES = int(os.getenv(PE_DOWNLOAD_MAX_BYTES_ENV, os.getenv("AMD_CTI_PAGE_MAX_BYTES", "250000")))
-_default_allowlist = "github.com,raw.githubusercontent.com,objects.githubusercontent.com"
-CTI_DOWNLOAD_ALLOWLIST = tuple(
-    d.strip().lower()
-    for d in os.getenv(CTI_DOWNLOAD_ALLOWLIST_ENV, _default_allowlist).split(",")
-    if d.strip()
+# CTI scrape resilience
+CTI_HOST_BLOCK_SECONDS_403 = 900.0
+CTI_HOST_BLOCK_SECONDS_429 = 3600.0
+CTI_HOST_BLOCK_SECONDS_TRANSPORT = 300.0
+CTI_SEARCH_LIMIT = 5
+CTI_SEARCH_BACKENDS = "duckduckgo"
+CTI_PAGE_LIMIT = 5
+CTI_PAGE_MAX_BYTES = 250000
+CTI_REQUEST_TIMEOUT = 20.0
+CTI_DOWNLOAD_ALLOWLIST = (
+    "github.com",
+    "raw.githubusercontent.com",
+    "objects.githubusercontent.com",
 )
+
+# Collection / discovery
+MALWARE_FALLBACK_PROVIDERS = ("malshare", "threatfox", "dynamic_cti")
+FALLBACK_PE_CHECK_MULT = 1
+PE_DOWNLOAD_MAX_BYTES = 250000
+BENIGN_NET_REPO_URL = "https://github.com/bormaa/Benign-NET.git"
+BENIGN_NET_MAX_DISCOVER = 20
+PE_DISCOVERY_MAX_URLS = 8
+MIN_PE_SOURCES = 3
+
+# Explainability (local: edit CAPA_RULES_DIR for your capa-rules checkout)
+OLLAMA_TIMEOUT = 8.0
+CAPA_RULES_DIR = Path("/opt/capa-rules")
+REPORT_LANGUAGE = "English"
+
+# --- Secrets and deployment endpoints (from environment only) ---
+
+OLLAMA_BASE_URL = os.getenv("AMD_OLLAMA_BASE_URL").strip()
+OLLAMA_MODEL = os.getenv("AMD_OLLAMA_MODEL").strip()
+BRAVE_SEARCH_API_KEY = os.getenv("AMD_BRAVE_SEARCH_API_KEY", "").strip()
+
+if _in_container:
+    CAPA_RULES_DIR = Path("/opt/capa-rules")
 
 # Sysinternals benign source
 SYSINTERNALS_BASE_URLS = (
@@ -193,7 +160,6 @@ SYSINTERNALS_BASE_URLS = (
 
 # GitHub Releases benign source
 GITHUB_API_URL = "https://api.github.com"
-GITHUB_TOKEN_ENV = "GITHUB_TOKEN"
 GITHUB_BENIGN_REPOS: list[tuple[str, str]] = [
     ("notepad-plus-plus", "notepad-plus-plus"),
     ("ShareX", "ShareX"),
@@ -346,39 +312,43 @@ def ensure_dirs() -> None:
 
 
 def get_auth_key() -> str:
-    key = os.getenv(AUTH_KEY_ENV, "")
+    key = os.getenv("MALWAREBAZAAR_AUTH_KEY", "")
     if not key:
-        raise ValueError(f"Missing {AUTH_KEY_ENV} environment variable")
+        raise ValueError("Missing MALWAREBAZAAR_AUTH_KEY environment variable")
     return key
 
 
 def get_github_token() -> str:
-    return os.getenv(GITHUB_TOKEN_ENV, "").strip()
+    return os.getenv("GITHUB_TOKEN", "").strip()
+
+
+def get_malshare_api_key() -> str:
+    key = os.getenv("MALSHARE_API_KEY", "").strip()
+    if not key:
+        raise ValueError("Missing MALSHARE_API_KEY environment variable")
+    return key
 
 
 def allow_local_benign() -> bool:
-    return os.getenv(ALLOW_LOCAL_BENIGN_ENV, "").strip() in ("1", "true", "yes")
+    return ALLOW_LOCAL_BENIGN
 
 
 def malshare_enabled() -> bool:
-    return os.getenv(MALSHARE_ENABLED_ENV, "0").strip() in ("1", "true", "yes")
+    return MALSHARE_ENABLED
 
 
 def mb_fallback_malshare() -> bool:
-    return os.getenv(MB_FALLBACK_MALSHARE_ENV, "0").strip() in ("1", "true", "yes")
+    return MB_FALLBACK_MALSHARE
 
 
 def pe_source_discovery_enabled() -> bool:
-    return os.getenv(PE_SOURCE_DISCOVERY_ENV, "0").strip() in ("1", "true", "yes")
+    return PE_SOURCE_DISCOVERY_ENABLED
 
 
-BENIGN_NET_REPO_URL = os.getenv(
-    BENIGN_NET_REPO_URL_ENV,
-    "https://github.com/bormaa/Benign-NET.git",
-).strip()
-BENIGN_NET_MAX_DISCOVER = max(1, int(os.getenv(BENIGN_NET_MAX_DISCOVER_ENV, "20")))
-PE_DISCOVERY_MAX_URLS = max(1, int(os.getenv(PE_DISCOVERY_MAX_URLS_ENV, "8")))
-MIN_PE_SOURCES = max(1, int(os.getenv(MIN_PE_SOURCES_ENV, "3")))
+def ollama_source_selection_enabled() -> bool:
+    return OLLAMA_SOURCE_SELECTION_ENABLED
+
+
 REPOS_DIR = PROJECT_ROOT / "data" / "repos"
 if _in_container:
     REPOS_DIR = Path("/data/repos")

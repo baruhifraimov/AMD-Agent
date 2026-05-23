@@ -47,10 +47,10 @@ are treated as stale and retrained.
   - SHA256-based sample download,
   - password-protected ZIP extraction using password `infected`.
 
-- MalShare API (optional, `AMD_MALSHARE_ENABLED=1`):
+- MalShare API (optional; set `MALSHARE_ENABLED = True` in `src/config.py`):
   - `PE32` hash listing and `getfile` download,
   - active malware collection alongside MalwareBazaar during bootstrap and steady volume fill,
-  - fallback when MalwareBazaar circuit/quota blocks (`AMD_MB_FALLBACK_MALSHARE=1`).
+  - fallback when MalwareBazaar circuit/quota blocks (`MB_FALLBACK_MALSHARE = True` in `config.py`).
 
 - Dynamic CTI discovery:
   - configurable `ddgs` backends and optional Brave Search API,
@@ -70,7 +70,7 @@ Dynamic CTI uses a Hybrid Strict policy: CTI pages are used only as evidence for
 ### PE source registry (optional)
 
 - `pe_sources` SQLite table stores discovered dataset/API/repo metadata (`PESourceStore`).
-- Enable autonomous URL discovery with `AMD_PE_SOURCE_DISCOVERY=1` (node `pe_source_discovery` runs before steady malware ingest when active sources are below `MIN_PE_SOURCES` or after concept drift).
+- Enable autonomous URL discovery with `PE_SOURCE_DISCOVERY_ENABLED = True` in `config.py` (node `pe_source_discovery` runs before steady malware ingest when active sources are below `MIN_PE_SOURCES` or after concept drift).
 - OOP HTTP clients live under `src/tools/clients/` (`MalwareBazaarClient`, `MalShareClient`, `ThreatFoxClient`).
 
 ## Safety And Persistence
@@ -120,7 +120,7 @@ Dynamic CTI fallback can validate hashes and load pending malware rows where `fi
 - Ollama running locally for LLM decisions/reports.
 - capa rules directory:
   - Docker build clones official `capa-rules` into `/opt/capa-rules`.
-  - Local runs need `AMD_CAPA_RULES_DIR` pointing to a valid rules directory.
+  - Local runs need `CAPA_RULES_DIR` in `src/config.py` pointing to a valid rules directory.
 
 Python dependencies are split for Docker cache stability:
 
@@ -155,14 +155,14 @@ Required:
 MALWAREBAZAAR_AUTH_KEY=your-auth-key
 ```
 
-Common Ollama setup:
+Common Ollama setup (in `.env`):
 
 ```env
-AMD_OLLAMA_ENABLED=1
 AMD_OLLAMA_BASE_URL=http://localhost:11434
 AMD_OLLAMA_MODEL=gemma4:latest
-AMD_OLLAMA_TIMEOUT=8
 ```
+
+Disable Ollama entirely by setting `OLLAMA_ENABLED = False` in [`src/config.py`](src/config.py).
 
 In Docker, compose also reads `AMD_OLLAMA_BASE_URL`. If the variable is not set,
 compose defaults it to:
@@ -184,67 +184,19 @@ If you want the README default model instead:
 ollama pull llama3.1:8b
 ```
 
-Other useful variables:
+Optional secrets and endpoints (see [`.env.example`](.env.example)):
 
 | Variable | Purpose |
 |---|---|
-| `GITHUB_TOKEN` | optional GitHub token for release API rate limits |
-| `MALWAREBAZAAR_AUTH_KEY` | abuse.ch key for MalwareBazaar, ThreatFox, and Twitter/X CTI (social refs via ThreatFox API) |
-| `AMD_BENIGN_PROVIDER` | force benign provider: `sysinternals`, `github`, or `benign_net` |
-| `MALSHARE_API_KEY` | MalShare API key (optional malware source) |
-| `AMD_MALSHARE_ENABLED` | enable MalShare provider and client (`0`/`1`) |
-| `AMD_MB_FALLBACK_MALSHARE` | try MalShare when MalwareBazaar download fails (`0`/`1`) |
-| `BENIGN_NET_REPO_URL` | git URL for Benign-NET clone (default bormaa/Benign-NET) |
-| `BENIGN_NET_MAX_DISCOVER` | max `.exe` paths discovered per run from Benign-NET (default `20`) |
-| `AMD_PE_SOURCE_DISCOVERY` | enable `pe_source_discovery` node and URL registry updates (`0`/`1`) |
-| `AMD_PE_DISCOVERY_MAX_URLS_PER_RUN` | max URLs fetched/classified per discovery pass (default `8`) |
-| `MIN_PE_SOURCES` | run PE discovery when active `pe_sources` count is below this (default `3`) |
-| `AMD_ALLOW_LOCAL_BENIGN` | ingest `data/benign/*` as label `0` |
-| `AMD_CTI_SEED_SOURCES_ENABLED` | seed known CTI feeds into `intel_sources` before polling (default `1`) |
-| `AMD_INTEL_MIN_POLL_INTERVAL` | minimum seconds between polls per high-yield source |
-| `AMD_INTEL_MAX_POLL_INTERVAL` | maximum seconds between polls per low-yield source |
-| `AMD_PROVIDER_COOLDOWN_ZERO_RUNS` | zero-yield provider runs before cooldown (default `3`) |
-| `AMD_PROVIDER_COOLDOWN_SECONDS` | provider cooldown duration in seconds (default `43200`) |
-| `AMD_PROVIDER_COOLDOWN_MIN_ATTEMPTS` | minimum requested/attempted candidates before cooldown applies (default `5`) |
-| `AMD_STEADY_BENIGN_EVERY_N` | benign refresh cadence once temporal splits are healthy (default `4`) |
-| `AMD_TESSERACT_MIXED_UNTIL_HEALTHY` | collect mixed malware/benign steady batches until temporal splits contain both labels (default `1`) |
-| `AMD_OLLAMA_SOURCE_SELECTION` | bind intel `@tool`s for Ollama source selection |
-| `AMD_CTI_DOWNLOAD_ALLOWLIST` | comma-separated hosts allowed for direct PE URL fallback |
-| `AMD_PE_FETCH_LIMIT` | max candidates returned per discovery pass (default `10`) |
-| `AMD_MALWARE_FALLBACK_PROVIDERS` | malware fallback chain after active MalwareBazaar/MalShare discovery, e.g. `malshare,threatfox,dynamic_cti` |
-| `AMD_FALLBACK_PE_CHECK_MULT` | max PE-validation checks per requested fallback candidate multiplier (default `1`) |
-| `AMD_PE_DOWNLOAD_MAX_BYTES` | max bytes for allowlisted direct downloads |
-| `AMD_CAPA_RULES_DIR` | capa rules directory passed with `-r` |
-| `AMD_REPORT_LANGUAGE` | language for Ollama drift report |
-| `AMD_CTI_SEARCH_LIMIT` | max search results per CTI query |
-| `AMD_CTI_SEARCH_BACKENDS` | comma-separated `ddgs` text backends, for example `duckduckgo,brave` |
-| `AMD_BRAVE_SEARCH_API_KEY` | optional Brave Search API key for CTI page discovery |
-| `AMD_CTI_PAGE_LIMIT` | max CTI pages per discovery run |
-| `AMD_CTI_PAGE_MAX_BYTES` | max bytes read from each CTI page |
-| `AMD_CTI_REQUEST_TIMEOUT` | CTI HTTP timeout |
-| `AMD_BOOTSTRAP_MAX_RUNS` | max bootstrap graph passes before giving up (default `60`) |
-| `AMD_BOOTSTRAP_INTERVAL` | seconds between bootstrap passes (default `10`) |
-| `AMD_ADWIN_DELTA` | River ADWIN confidence bound (default `0.002`; higher = less sensitive) |
-| `AMD_DRIFT_WINDOW_DAYS` | target temporal window for multivariate drift tracking (default `60`) |
-| `AMD_DRIFT_MIN_WINDOW_SAMPLES` | minimum samples per rolling drift window (default `50`) |
-| `AMD_REPLAY_FRACTION` | historical data fraction used for MADAR replay, capped by `REPLAY_BUDGET` (default `0.3`) |
-| `AMD_FEATURE_SELECTION_K` | number of XGBoost-ranked features retained for LightGBM (default `384`) |
-| `AMD_OPTUNA_TRIALS` | LightGBM tuning trials (default `25`; set `0` to disable) |
-| `AMD_OPTUNA_TIMEOUT` | Optuna tuning timeout in seconds (default `300`) |
-| `AMD_EVAL_EVERY_RUNS` | run periodic TESSERACT eval every N steady-state graph passes (default `10`) |
-| `AMD_EVAL_SKIP_BOOTSTRAP` | skip periodic TESSERACT eval during bootstrap (default `1`) |
-| `AMD_MB_MIN_REQUEST_INTERVAL` | minimum seconds between MalwareBazaar POST requests (default `1.5`) |
-| `AMD_MB_USER_AGENT` | custom User-Agent for MB API (default identifies AMD-Agent research use) |
-| `AMD_MB_USER_AGENT_CONTACT` | optional contact string appended to User-Agent |
-| `AMD_MB_INFO_CACHE_TTL_DAYS` | SQLite cache TTL for `get_info` / PE verdict lookups (default `30`) |
-| `AMD_MB_DAILY_DOWNLOAD_LIMIT` | max `get_file` downloads per UTC day per IP (default `1900`, under abuse.ch 2000 cap) |
-| `AMD_MB_MAX_INFO_CALLS_PER_RUN` | max `get_info` calls per graph run (`0` = unlimited) |
-| `AMD_MB_CIRCUIT_FAILURE_THRESHOLD` | consecutive MB 5xx/transport failures before circuit opens (default `3`) |
-| `AMD_MB_CIRCUIT_OPEN_SECONDS` | seconds to skip MB API calls while circuit is open after 5xx (default `120`) |
-| `AMD_MB_CIRCUIT_OPEN_SECONDS_429` | seconds to skip MB API after HTTP 429 backoff exhausted (default `3600`) |
-| `AMD_CTI_HOST_BLOCK_SECONDS_403` | block CTI host after HTTP 403 (default `900`) |
-| `AMD_CTI_HOST_BLOCK_SECONDS_429` | block CTI host after HTTP 429 (default `3600`) |
-| `AMD_CTI_HOST_BLOCK_SECONDS_TRANSPORT` | block CTI host after connection errors (default `300`) |
+| `GITHUB_TOKEN` | GitHub API rate limits for benign release discovery |
+| `MALSHARE_API_KEY` | MalShare malware API (enable with `MALSHARE_ENABLED` in `config.py`) |
+| `AMD_BRAVE_SEARCH_API_KEY` | Brave Search for CTI page discovery |
+| `AMD_OLLAMA_BASE_URL` | Ollama HTTP endpoint |
+| `AMD_OLLAMA_MODEL` | Ollama model tag (e.g. `llama3.1:8b`) |
+
+**All other tuning** (scheduler interval, bootstrap limits, drift/ADWIN, MalwareBazaar throttles, provider cooldowns, feature flags such as `ALLOW_LOCAL_BENIGN`, `PE_SOURCE_DISCOVERY_ENABLED`, `FORCED_BENIGN_PROVIDER`, capa rules path for local dev, etc.) lives in [`src/config.py`](src/config.py). Edit constants there instead of `.env`.
+
+Legacy `AMD_*` keys in an existing `.env` are ignored after this change; prune them when convenient.
 
 ## Docker Run
 
@@ -277,7 +229,7 @@ docker compose up --force-recreate
 
 The default `amd-agent` command (`docker/amd-agent-run.sh`) skips bootstrap when
 trainable counts and `model.pkl` are already ready, then stays in `--daemon`
-(scheduler interval default 1800s; tune `AMD_SCHED_INTERVAL` in `.env`).
+(scheduler interval default 1800s; tune `SCHED_INTERVAL_SECONDS` in `src/config.py`).
 
 One-off graph pass:
 
@@ -329,7 +281,7 @@ Local capa setup example:
 
 ```powershell
 git clone https://github.com/mandiant/capa-rules.git C:\capa-rules
-$env:AMD_CAPA_RULES_DIR="C:\capa-rules"
+# Edit CAPA_RULES_DIR in src/config.py, e.g. Path(r"C:\capa-rules")
 ```
 
 ## Malware CTI Fallback
@@ -360,7 +312,7 @@ docker compose up --force-recreate
 
 | Env var | Purpose |
 |---|---|
-| `AMD_CTI_SEED_SOURCES_ENABLED` | Keep curated CTI feeds enabled in the native source registry |
+| `CTI_SEED_SOURCES_ENABLED` | Keep curated CTI feeds enabled in the native source registry (`config.py`) |
 
 Pending row contract:
 
@@ -373,7 +325,7 @@ Pending row contract:
 
 ## Evaluation
 
-The `evaluation` LangGraph node (`src/nodes/evaluation_node.py`) sits at the end of every graph pass, but TESSERACT only runs every `AMD_EVAL_EVERY_RUNS` steady-state passes. It is skipped during bootstrap by default and forced after every retrain attempt, including skipped retrains. TESSERACT logic lives in `src/evaluation/tesseract.py`.
+The `evaluation` LangGraph node (`src/nodes/evaluation_node.py`) sits at the end of every graph pass, but TESSERACT only runs every `EVAL_EVERY_RUNS` steady-state passes. It is skipped during bootstrap by default and forced after every retrain attempt, including skipped retrains. TESSERACT logic lives in `src/evaluation/tesseract.py`.
 
 It uses:
 
@@ -421,7 +373,7 @@ For LaTeX builds, copy or symlink the decay plot into `report/figures/performanc
 
 ### Submission checklist
 
-- Set `AMD_ALLOW_LOCAL_BENIGN=0` in `.env` (default in `.env.example`).
+- Keep `ALLOW_LOCAL_BENIGN = False` in `src/config.py` (default).
 - Keep `data/benign/` empty for experiments (no pre-seeded benign PEs).
 - Run `python scripts/preflight_check.py` and resolve warnings about local benign.
 - Generate report evidence: bootstrap if needed, then `--daemon` until `drift_log.jsonl` has several drift/retrain cycles.
@@ -453,7 +405,7 @@ Before leaving the stack running continuously:
 1. `python scripts/preflight_check.py` — phase, per-class trainable counts, bundle ready, pending depth.
 2. `docker compose up` — logs show `bootstrap skipped` or bootstrap complete, then `Scheduler started`.
 3. Steady malware passes hit active MalwareBazaar/MalShare discovery directly, with fallback top-up if needed.
-4. After new samples extract features, ADWIN updates use `AMD_ADWIN_DELTA` (tune if single-file retrains are too frequent).
+4. After new samples extract features, ADWIN updates use `ADWIN_DELTA` in `config.py` (tune if single-file retrains are too frequent).
 
 ## Known Runtime Checklist
 
@@ -469,7 +421,7 @@ curl.exe http://localhost:11434/api/tags
 ```
 
 - `AMD_OLLAMA_MODEL` matches an installed Ollama model.
-- `AMD_CAPA_RULES_DIR` points to a real capa rules directory for local runs.
+- `CAPA_RULES_DIR` in `config.py` points to a real capa rules directory for local runs.
 - `data/benign` contains enough benign PE files, or live benign providers are reachable.
 - `python -m pytest -q` works after dependencies are installed.
 
@@ -511,7 +463,7 @@ Clone rules and set env:
 
 ```powershell
 git clone https://github.com/mandiant/capa-rules.git C:\capa-rules
-$env:AMD_CAPA_RULES_DIR="C:\capa-rules"
+# Edit CAPA_RULES_DIR in src/config.py, e.g. Path(r"C:\capa-rules")
 ```
 
 ### SQLite locked

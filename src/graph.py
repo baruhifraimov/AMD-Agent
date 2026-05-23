@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 import logging
-import os
 from pathlib import Path
 import time
 from typing import Literal
@@ -15,11 +14,13 @@ from langgraph.graph import END, START, StateGraph
 import src.db.tracker as db
 from src.collection.context import build_collection_context
 from src.config import (
+    BOOTSTRAP_INTERVAL_SECONDS,
+    BOOTSTRAP_MAX_RUNS,
     MIN_PE_SOURCES,
     MIN_TRAIN_BENIGN,
     MIN_TRAIN_MALWARE,
+    PE_SOURCE_DISCOVERY_ENABLED,
     ensure_dirs,
-    pe_source_discovery_enabled,
 )
 from src.ml.classifier import load_bundle, model_bundle_ready, training_targets_met
 from src.nodes import (
@@ -73,7 +74,7 @@ def route_after_selector(
 
 
 def _should_run_pe_source_discovery(state: AgentState) -> bool:
-    if not pe_source_discovery_enabled():
+    if not PE_SOURCE_DISCOVERY_ENABLED:
         return False
     if state.need_new_sources:
         return True
@@ -91,10 +92,6 @@ def route_after_pe_discovery(
 
 DEFAULT_THREAD_ID = "amd-agent-default"
 _CHECKPOINTER = MemorySaver()
-DEFAULT_BOOTSTRAP_MAX_RUNS = 60
-DEFAULT_BOOTSTRAP_INTERVAL = 10
-
-
 def build_graph():
     """Build and compile the agent StateGraph."""
     graph = StateGraph(AgentState)
@@ -174,8 +171,8 @@ def run_pipeline() -> AgentState:
 
 def run_bootstrap() -> AgentState | None:
     """Run repeated graph passes until the initial model is ready or safety limit is hit."""
-    max_runs = _env_int("AMD_BOOTSTRAP_MAX_RUNS", DEFAULT_BOOTSTRAP_MAX_RUNS)
-    interval_seconds = _env_int("AMD_BOOTSTRAP_INTERVAL", DEFAULT_BOOTSTRAP_INTERVAL)
+    max_runs = BOOTSTRAP_MAX_RUNS
+    interval_seconds = BOOTSTRAP_INTERVAL_SECONDS
     final: AgentState | None = None
 
     logger.info(
@@ -205,7 +202,9 @@ def run_bootstrap() -> AgentState | None:
         if run_idx < max_runs and interval_seconds > 0:
             time.sleep(interval_seconds)
 
-    logger.warning("Bootstrap stopped before model was ready; increase AMD_BOOTSTRAP_MAX_RUNS")
+    logger.warning(
+        "Bootstrap stopped before model was ready; increase BOOTSTRAP_MAX_RUNS in src/config.py"
+    )
     return final
 
 
@@ -235,11 +234,6 @@ def main() -> None:
         run_bootstrap()
     else:
         run_pipeline()
-
-
-def _env_int(name: str, default: int) -> int:
-    raw = os.getenv(name, "").strip()
-    return int(raw) if raw else default
 
 
 if __name__ == "__main__":

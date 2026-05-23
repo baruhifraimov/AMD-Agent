@@ -34,6 +34,7 @@ def model_retrain(state: AgentState) -> dict:
 
     historical_features: list[dict] = []
     historical_labels: list[int] = []
+    historical_families: list[str] = []
     new_hashes = {item.get("sha256") for item in state.new_labeled_batch}
 
     for row in rows:
@@ -48,6 +49,7 @@ def model_retrain(state: AgentState) -> dict:
             continue
         historical_features.append(feats)
         historical_labels.append(label)
+        historical_families.append(row.get("malware_family") or "unknown")
 
     new_features: list[dict] = []
     new_labels: list[int] = []
@@ -57,6 +59,10 @@ def model_retrain(state: AgentState) -> dict:
             continue
         new_features.append(dict(item))
         new_labels.append(label)
+        
+    task_id = tracker.create_task(trigger="drift_detected", sample_count=len(new_hashes))
+    for h in new_hashes:
+        tracker.update_sample_task(h, task_id)
 
     if not new_features and state.new_labeled_batch:
         logger.warning(
@@ -66,13 +72,17 @@ def model_retrain(state: AgentState) -> dict:
         return _retrain_skipped(state, historical_features, new_features)
 
     try:
+        from src.ml.classifier import load_bundle
+        
         feature_reselection = _force_feature_reselection(state.drift_stats)
         bundle = madar_retrain(
             historical_features,
             new_features,
             historical_labels,
             new_labels,
+            historical_families=historical_families,
             force_feature_reselection=feature_reselection,
+            init_model=load_bundle(),
         )
     except ValueError as exc:
         logger.warning("MADAR retrain skipped: %s", exc)
