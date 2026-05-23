@@ -6,7 +6,7 @@ import src.db.tracker as db
 from src.collection.context import CollectionContext
 from src.collection.strategies.base import SourceSelectionResult
 from src.collection.balance import choose_benign_sources, next_label
-from src.config import STEADY_BENIGN_EVERY_N, TESSERACT_MIXED_UNTIL_HEALTHY
+from src.config import IMBALANCE_ALERT_RATIO, STEADY_BENIGN_EVERY_N, TESSERACT_MIXED_UNTIL_HEALTHY
 from src.sources.registry import SourceRegistry, get_registry
 
 
@@ -21,6 +21,16 @@ class SteadyStateSelectionStrategy:
             if not bool(health.get("healthy")):
                 return self._mixed(registry, "steady_temporal_mixed")
 
+        # Force deficit label when severely imbalanced — overrides N-round rotation
+        n_mal = ctx.malware_count
+        n_ben = ctx.benign_count
+        if n_ben > 0 and n_mal > 0:
+            ratio = n_mal / n_ben
+            if ratio < IMBALANCE_ALERT_RATIO:
+                return self._malware("steady_malware_imbalance_correction")
+            if ratio > (1.0 / IMBALANCE_ALERT_RATIO):
+                return self._benign(registry, "steady_benign_imbalance_correction")
+
         if next_label(ctx.malware_count, ctx.benign_count) == 0:
             return self._benign(registry, "steady_benign_balance")
 
@@ -29,11 +39,14 @@ class SteadyStateSelectionStrategy:
             if run_count % STEADY_BENIGN_EVERY_N == 0:
                 return self._benign(registry, "steady_benign_refresh")
 
+        return self._malware("steady_malware_active")
+
+    def _malware(self, strategy: str) -> SourceSelectionResult:
         return SourceSelectionResult(
             source_type="malwarebazaar",
             selected_sources=["malwarebazaar"],
             expected_label=1,
-            discovery_strategy="steady_malware_active",
+            discovery_strategy=strategy,
             collection_phase="steady",
             route_hint="source_discovery",
         )

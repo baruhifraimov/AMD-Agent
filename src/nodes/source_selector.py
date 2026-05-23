@@ -6,7 +6,7 @@ import logging
 
 import src.db.tracker as db
 from src.collection import CollectionStrategyFactory, build_collection_context
-from src.config import ollama_source_selection_enabled
+from src.config import IMBALANCE_ALERT_RATIO, TARGET_MALWARE_BENIGN_RATIO, ollama_source_selection_enabled
 from src.llm import choose_sources_with_ollama
 from src.sources.registry import get_registry
 from src.state import AgentState
@@ -22,6 +22,28 @@ def source_selector(state: AgentState) -> dict:
     counts = tracker.count_by_label()
     available_sources = registry.list_names()
     source_labels = {name: registry.get(name).expected_label for name in available_sources}
+
+    # Imbalance monitoring
+    n_mal = int(counts.get(1, 0))
+    n_ben = int(counts.get(0, 0))
+    if n_ben > 0 and n_mal > 0:
+        ratio = n_mal / n_ben
+        if ratio < IMBALANCE_ALERT_RATIO:
+            logger.warning(
+                "Class imbalance: malware=%d benign=%d ratio=%.2f (target=%.2f)"
+                " — too few malware, prioritising malware collection",
+                n_mal, n_ben, ratio, TARGET_MALWARE_BENIGN_RATIO,
+            )
+        elif ratio > (1.0 / IMBALANCE_ALERT_RATIO):
+            logger.warning(
+                "Class imbalance: malware=%d benign=%d ratio=%.2f (target=%.2f)"
+                " — too few benign, prioritising benign collection",
+                n_mal, n_ben, ratio, TARGET_MALWARE_BENIGN_RATIO,
+            )
+    elif n_ben == 0 and n_mal > 0:
+        logger.warning("Class imbalance: %d malware, 0 benign — prioritising benign collection", n_mal)
+    elif n_mal == 0 and n_ben > 0:
+        logger.warning("Class imbalance: 0 malware, %d benign — prioritising malware collection", n_ben)
 
     decision = None
     if ctx.phase == "steady" and selection.expected_label != -1 and ollama_source_selection_enabled():

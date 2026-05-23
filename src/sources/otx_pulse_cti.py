@@ -42,8 +42,12 @@ class OTXPulseCTIProvider(PESourceProvider):
         if not pulses:
             return []
 
+        # Move tracker init here so we can check MB cache during evidence building
+        tracker = db.get_tracker()
+
         evidence: list[dict[str, Any]] = []
         seen_hashes: set[str] = set()
+        skipped_cached: int = 0
         max_hashes = OTX_PULSE_MAX_HASHES
         for pulse in pulses:
             if len(evidence) >= max_hashes:
@@ -55,11 +59,19 @@ class OTXPulseCTIProvider(PESourceProvider):
                 if sha in seen_hashes:
                     continue
                 seen_hashes.add(sha)
+                # Skip hashes already confirmed non-PE in MB cache — avoids
+                # repeating the same failed lookups every round.
+                if tracker.get_mb_pe_verdict(sha) is False:
+                    skipped_cached += 1
+                    continue
                 evidence.append({
                     "sha256": sha,
                     "url": "",
                     "context": raw_text[:2000],
                 })
+
+        if skipped_cached:
+            logger.info("OTX skipped %d hashes already cached as non-PE", skipped_cached)
 
         if not evidence:
             logger.info("OTX pulses contained no SHA256 file hash indicators")
@@ -69,7 +81,6 @@ class OTXPulseCTIProvider(PESourceProvider):
 
         # MB PE check first — cheap cached API call eliminates non-PE hashes
         # before spending Ollama cycles on them.
-        tracker = db.get_tracker()
         pe_evidence: list[dict[str, Any]] = []
         for item in evidence:
             sha = str(item.get("sha256", "")).lower()
