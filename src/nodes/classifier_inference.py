@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-import logging
-
 import src.db.tracker as db
 from src.config import MIN_TRAIN_BENIGN, MIN_TRAIN_MALWARE
+from src.log import PHASE_INFERENCE, get_logger, phase_log, vlog
 from src.ml.classifier import (
     cold_start_train,
     load_bundle,
@@ -15,7 +14,7 @@ from src.ml.classifier import (
 from src.state import AgentState
 from src.tools.update import update_prediction
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 def classifier_inference(state: AgentState) -> dict:
@@ -23,7 +22,9 @@ def classifier_inference(state: AgentState) -> dict:
     counts = tracker.count_by_label()
     bundle = load_bundle()
     if bundle is not None and not model_bundle_ready(bundle):
-        logger.info(
+        vlog(
+            logger,
+            "info",
             "Existing model bundle is below current bootstrap targets; "
             "awaiting malware=%d/%d benign=%d/%d",
             counts.get(1, 0),
@@ -40,7 +41,7 @@ def classifier_inference(state: AgentState) -> dict:
 
     if bundle is None:
         metrics["model_ready"] = 0.0
-        logger.info("Model not ready; awaiting more training samples")
+        phase_log(logger, PHASE_INFERENCE, "Model not ready; awaiting more training samples")
         return {"predictions": predictions, "evaluation_metrics": metrics}
 
     metrics["model_ready"] = 1.0
@@ -55,5 +56,5 @@ def classifier_inference(state: AgentState) -> dict:
 
     metrics["decision_threshold"] = threshold
     metrics["mean_score"] = float(sum(scores.values()) / len(scores)) if scores else 0.0
-    logger.info("Scored %d samples (threshold=%.4f)", len(scores), threshold)
+    phase_log(logger, PHASE_INFERENCE, "Scored %d samples (threshold=%.4f)", len(scores), threshold)
     return {"predictions": predictions, "evaluation_metrics": metrics}

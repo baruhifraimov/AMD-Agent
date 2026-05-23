@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import logging
 from typing import Any
 
 from src.config import PE_DISCOVERY_MAX_URLS
@@ -12,7 +11,9 @@ from src.sources.pe_source_discovery.planner import plan_discovery_targets
 from src.sources.pe_source_discovery.registry_register import register_classification
 from src.sources.pe_source_store import PESourceStore
 
-logger = logging.getLogger(__name__)
+from src.log import PHASE_DISCOVERY, get_logger, phase_log, vlog
+
+logger = get_logger(__name__)
 
 
 def run_pe_source_discovery(
@@ -65,5 +66,5 @@ def run_pe_source_discovery(
                 stats["registered"] += 1
 
     stats["active_count"] = pe_store.count_active()
-    logger.info("PE source discovery: %s", stats)
+    phase_log(logger, PHASE_DISCOVERY, "PE source discovery: %s", stats)
     return stats

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import logging
 from pathlib import Path
 from typing import Any
 
@@ -22,7 +21,9 @@ from src.ml.classifier import (
     score_feature_matrix,
 )
 
-logger = logging.getLogger(__name__)
+from src.log import PHASE_EVAL, get_logger, phase_log, vlog
+
+logger = get_logger(__name__)
 
 
 def compute_metrics(
@@ -59,11 +60,11 @@ def run_tesseract_eval(
     tracker = tracker or db.get_tracker()
     X, y, _ = build_training_arrays(tracker)
     if len(y) < 5:
-        logger.warning("Insufficient samples for TESSERACT eval: %d", len(y))
+        logger.warning("[%s] Insufficient samples for TESSERACT eval: %d", PHASE_EVAL, len(y))
         return {}
     health = tracker.temporal_split_health(train_ratio=train_ratio, val_ratio=val_ratio)
     if not bool(health.get("healthy")):
-        logger.info("TESSERACT skipped: unhealthy temporal split %s", health)
+        vlog(logger, "info", "TESSERACT skipped: unhealthy temporal split %s", health)
         return {}
 
     n = len(y)
@@ -77,10 +78,10 @@ def run_tesseract_eval(
     if not model_bundle_ready(production_bundle):
         return {}
     if len(np.unique(y_train)) < 2:
-        logger.info("TESSERACT skipped: train split has a single class")
+        vlog(logger, "info", "TESSERACT skipped: train split has a single class")
         return {}
     if len(np.unique(y_val)) < 2 or len(np.unique(y_test)) < 2:
-        logger.info("TESSERACT skipped: single-class temporal validation/test split")
+        vlog(logger, "info", "TESSERACT skipped: single-class temporal validation/test split")
         return {}
 
     try:
@@ -93,7 +94,7 @@ def run_tesseract_eval(
             optimize=False,
         )
     except ValueError as exc:
-        logger.info("TESSERACT skipped: %s", exc)
+        vlog(logger, "info", "TESSERACT skipped: %s", exc)
         return {}
 
     threshold = float(temporal_bundle.get("threshold", 0.5))

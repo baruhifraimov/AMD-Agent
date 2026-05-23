@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-import logging
 from typing import Any
-logger = logging.getLogger(__name__)
+from src.log import PHASE_DISCOVERY, get_logger, phase_log, vlog
+
+logger = get_logger(__name__)
 
 
 def is_valid_feed_url(url: str) -> bool:
@@ -32,17 +33,17 @@ def parse_feed_entries(feed_url: str, *, max_entries: int = 20) -> list[dict[str
     try:
         import feedparser
     except ImportError as exc:
-        logger.warning("feedparser unavailable: %s", exc)
+        logger.warning("[%s] feedparser unavailable: %s", PHASE_DISCOVERY, exc)
         return []
 
     try:
         parsed = feedparser.parse(feed_url)
     except Exception as exc:
-        logger.warning("Feed parse failed for %s: %s", feed_url, exc)
+        logger.warning("[%s] Feed parse failed for %s: %s", PHASE_DISCOVERY, feed_url, exc)
         return []
 
     if getattr(parsed, "bozo", False) and not getattr(parsed, "entries", None):
-        logger.info("Feed invalid or empty: %s", feed_url)
+        vlog(logger, "info", "Feed invalid or empty: %s", feed_url)
         return []
 
     entries: list[dict[str, Any]] = []

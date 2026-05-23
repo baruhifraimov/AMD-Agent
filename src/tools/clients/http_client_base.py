@@ -2,14 +2,15 @@
 
 from __future__ import annotations
 
-import logging
 import threading
 import time
 from typing import Any
 
 import httpx
 
-logger = logging.getLogger(__name__)
+from src.log import PHASE_API, get_logger, phase_log, vlog
+
+logger = get_logger(__name__)
 
 RETRYABLE_STATUS = frozenset({502, 503, 504})
 RATE_LIMIT_STATUS = 429
@@ -63,7 +64,7 @@ class CircuitBreaker:
 
     def _open(self, seconds: float, *, reason: str) -> None:
         self._open_until = time.monotonic() + seconds
-        logger.warning("API circuit open for %.0fs (%s)", seconds, reason)
+        logger.warning("[%s] API circuit open for %.0fs (%s)", PHASE_API, seconds, reason)
 
 
 class RateLimiter:
@@ -159,7 +160,9 @@ class HttpApiClient:
                 if response.status_code == RATE_LIMIT_STATUS:
                     if attempt < len(self._backoff_seconds):
                         delay = self._backoff_seconds[attempt]
-                        logger.warning(
+                        vlog(
+                            logger,
+                            "warning",
                             "HTTP 429 on %s; backing off %.0fs (attempt %d)",
                             self.base_url,
                             delay,

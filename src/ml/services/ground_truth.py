@@ -2,12 +2,9 @@
 
 from __future__ import annotations
 
-import logging
 from typing import Any
 
 import src.db.tracker as db
-
-logger = logging.getLogger(__name__)
 
 VERIFIED_DISCOVERY_SOURCES = frozenset(
     {

@@ -7,7 +7,6 @@ therefore return None or conservative defaults instead of raising.
 from __future__ import annotations
 
 import json
-import logging
 import re
 from typing import Any
 
@@ -21,8 +20,10 @@ from src.config import (
     REPORT_LANGUAGE,
     ollama_source_selection_enabled,
 )
+from src.llm.ollama_trace import invoke_chat
+from src.log import PHASE_LLM, get_logger, phase_log, vlog
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 _CODE_FENCE_RE = re.compile(r"```(?:json|JSON)?\s*\n?(.*?)```", re.DOTALL)
 
@@ -51,11 +52,12 @@ def _ollama_disabled() -> bool:
 
 def _chat_model() -> Any | None:
     if _ollama_disabled():
+        vlog(logger, "info", "Ollama disabled via OLLAMA_ENABLED=False")
         return None
     try:
         from langchain_ollama import ChatOllama
     except Exception as exc:
-        logger.info("Ollama disabled: langchain_ollama unavailable: %s", exc)
+        phase_log(logger, PHASE_LLM, "langchain_ollama unavailable: %s", exc, level="warning")
         return None
     try:
         return ChatOllama(
@@ -65,7 +67,7 @@ def _chat_model() -> Any | None:
             temperature=0,
         )
     except Exception as exc:
-        logger.warning("Ollama model setup failed: %s", exc)
+        phase_log(logger, PHASE_LLM, "model setup failed: %s", exc, level="warning")
         return None
 
 
@@ -144,7 +146,7 @@ def choose_sources_with_ollama(
         from langchain_core.tools import tool
         from src.tools.threat_intel_tools import build_intel_tools
     except Exception as exc:
-        logger.info("Ollama source selection fallback: tool binding unavailable: %s", exc)
+        vlog(logger, "info","Ollama source selection fallback: tool binding unavailable: %s", exc)
         return None
 
     intel_tools = build_intel_tools()
@@ -185,12 +187,16 @@ def choose_sources_with_ollama(
             "sample_counts_by_label": counts,
         }
     )
+    messages = [("system", system), ("human", human)]
     try:
-        response = model.bind_tools(tools).invoke(
-            [("system", system), ("human", human)]
+        response = invoke_chat(
+            model,
+            messages,
+            operation="source_selection",
+            bind_tools=tools,
         )
     except Exception as exc:
-        logger.info("Ollama source selection failed; using fallback: %s", exc)
+        phase_log(logger, PHASE_LLM, "source_selection failed; using fallback: %s", exc, level="warning")
         return None
 
     tool_calls = getattr(response, "tool_calls", None) or []
@@ -199,7 +205,7 @@ def choose_sources_with_ollama(
     args = dict(tool_calls[0].get("args") or {})
     decision = _coerce_source_decision(args, available_sources, source_labels)
     if decision is None:
-        logger.info("Invalid Ollama source decision; using fallback: %s", args)
+        vlog(logger, "info","Invalid Ollama source decision; using fallback: %s", args)
     return decision
 
 
@@ -266,11 +272,13 @@ def semantic_filter_hashes(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
         "Return JSON array only. Each object: "
         "{sha256, accepted, malware_family, is_technical_report, confidence_score, reason}"
     )
+    messages = [("system", prompt), ("human", json.dumps(items[:25]))]
+    phase_log(logger, PHASE_LLM, "semantic_filter: evaluating %d hash candidate(s)", min(len(items), 25))
     try:
-        response = model.invoke([("system", prompt), ("human", json.dumps(items[:25]))])
+        response = invoke_chat(model, messages, operation="semantic_filter")
         parsed = _json_from_text(str(getattr(response, "content", "")))
     except Exception as exc:
-        logger.info("Ollama semantic hash filtering failed; using fallback: %s", exc)
+        phase_log(logger, PHASE_LLM, "semantic_filter failed; using keyword fallback: %s", exc, level="warning")
         return _keyword_fallback(items)
     if not isinstance(parsed, list):
         return _keyword_fallback(items)
@@ -328,11 +336,12 @@ def triage_pe_error(sha256: str, path: str, error: str, metadata: dict[str, Any]
         "{\"decision\":\"reject\"|\"keep\",\"reason\":\"...\"}."
     )
     payload = {"sha256": sha256, "path": path, "error": error, "metadata": metadata}
+    messages = [("system", prompt), ("human", json.dumps(payload))]
     try:
-        response = model.invoke([("system", prompt), ("human", json.dumps(payload))])
+        response = invoke_chat(model, messages, operation="pe_error_triage")
         parsed = _json_from_text(str(getattr(response, "content", "")))
     except Exception as exc:
-        logger.info("Ollama PE error triage failed; rejecting by default: %s", exc)
+        phase_log(logger, PHASE_LLM, "pe_error_triage failed; rejecting by default: %s", exc, level="warning")
         return "reject"
     if isinstance(parsed, dict) and str(parsed.get("decision", "")).lower() == "keep":
         return "keep"
@@ -362,13 +371,21 @@ def summarize_drift_context(
         "drift_stats": drift_stats,
         "feature_summary": _compact_feature_summary(feature_vectors, hash_metadata),
     }
+    messages = [("system", prompt), ("human", json.dumps(payload))]
+    phase_log(
+        logger,
+        PHASE_LLM,
+        "drift_summary: stats=%d feature_rows=%d",
+        len(drift_stats),
+        len(feature_vectors),
+    )
     try:
-        response = model.invoke([("system", prompt), ("human", json.dumps(payload))])
+        response = invoke_chat(model, messages, operation="drift_summary")
         content = str(getattr(response, "content", "")).strip()
         if content:
             return content
     except Exception as exc:
-        logger.info("Ollama drift summarization failed; using fallback: %s", exc)
+        phase_log(logger, PHASE_LLM, "drift_summary failed; using statistical fallback: %s", exc, level="warning")
     return fallback
 
 

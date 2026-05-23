@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
-import logging
 from typing import Any
 
 from src.config import get_malshare_api_key, malshare_enabled
 from src.tools.clients.http_client_base import ApiUnavailable, HttpApiClient
 
-logger = logging.getLogger(__name__)
+from src.log import PHASE_API, get_logger, phase_log, vlog
+
+logger = get_logger(__name__)
 
 MALSHARE_API_URL = "https://malshare.com/api.php"
 
@@ -52,7 +53,7 @@ class MalShareClient(HttpApiClient):
         try:
             data = response.json()
         except Exception as exc:
-            logger.warning("MalShare list PE32 parse failed: %s", exc)
+            vlog(logger, "warning", "MalShare list PE32 parse failed: %s", exc)
             return []
 
         if isinstance(data, list):

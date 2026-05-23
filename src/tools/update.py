@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-import logging
 from typing import Any
 
 import src.db.tracker as db
+from src.log import get_logger, vlog
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 def insert_sample(
@@ -36,17 +36,17 @@ def update_file_path(
     file_path: str,
     **kwargs: Any,
 ) -> None:
-    logger.debug("Update tool: file_path for %s", sha256[:12])
+    vlog(logger, "debug", "Update tool: file_path for %s", sha256[:12])
     tracker.update_file_path(sha256, file_path, **kwargs)
 
 
 def update_features(tracker: db.MalwareTracker, sha256: str, features: dict[str, Any]) -> None:
-    logger.debug("Update tool: features for %s", sha256[:12])
+    vlog(logger, "debug", "Update tool: features for %s", sha256[:12])
     tracker.update_features(sha256, features)
 
 
 def update_prediction(tracker: db.MalwareTracker, sha256: str, prediction: float) -> None:
-    logger.debug("Update tool: prediction for %s", sha256[:12])
+    vlog(logger, "debug", "Update tool: prediction for %s", sha256[:12])
     tracker.update_prediction(sha256, prediction)
 
 
@@ -56,7 +56,7 @@ def mark_corrupted(
     reason: str,
     **kwargs: Any,
 ) -> None:
-    logger.debug("Update tool: mark_corrupted for %s", sha256[:12])
+    vlog(logger, "debug", "Update tool: mark_corrupted for %s", sha256[:12])
     tracker.mark_corrupted(sha256, reason, **kwargs)
 
 
@@ -68,5 +68,5 @@ def insert_pending_hash(
     label: int = 1,
     **kwargs: Any,
 ) -> None:
-    logger.debug("Update tool: insert_pending_hash for %s", sha256[:12])
+    vlog(logger, "debug", "Update tool: insert_pending_hash for %s", sha256[:12])
     tracker.insert_pending_hash(sha256, acquired_at=acquired_at, label=label, **kwargs)

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import logging
 from pathlib import Path
 import time
 from typing import Literal
@@ -37,11 +36,17 @@ from src.nodes import (
     source_selector,
 )
 from src.sources.pe_source_store import PESourceStore
+from src.log import (
+    PHASE_BOOTSTRAP,
+    PHASE_SCHEDULER,
+    configure_logging,
+    get_logger,
+    phase_log,
+)
 from src.runtime.scheduler import SchedulerLoop, load_scheduler_config
 from src.state import AgentState
 
-logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 def _wrap(node_fn):
@@ -162,16 +167,25 @@ def run_pipeline() -> AgentState:
         config={"configurable": {"thread_id": DEFAULT_THREAD_ID}},
     )
     final = AgentState.model_validate(result)
-    logger.info(
-        "Run complete: source=%s label=%d hashes=%d predictions=%d drift=%s",
+    ctx = build_collection_context()
+    pending_queue = len(db.get_tracker().fetch_pending_hashes(limit=500))
+    phase_log(
+        logger,
+        PHASE_SCHEDULER,
+        "Run complete: source=%s label=%d batch=%d predictions=%d drift=%s "
+        "phase=%s corpus=%d/%d pending_queue=%d",
         final.source_type,
         final.expected_label,
         len(final.discovered_hashes),
         len(final.predictions),
         final.drift_detected,
+        ctx.phase,
+        ctx.malware_count,
+        ctx.benign_count,
+        pending_queue,
     )
     if final.semantic_report:
-        logger.info("Report: %s", final.semantic_report)
+        phase_log(logger, PHASE_SCHEDULER, "Report: %s", final.semantic_report)
 
     return final
 
@@ -182,35 +196,48 @@ def run_bootstrap() -> AgentState | None:
     interval_seconds = BOOTSTRAP_INTERVAL_SECONDS
     final: AgentState | None = None
 
-    logger.info(
-        "Bootstrap started max_runs=%d interval=%ds target_malware=%d target_benign=%d",
+    phase_log(
+        logger,
+        PHASE_BOOTSTRAP,
+        "Started max_runs=%d interval=%ds target_malware=%d target_benign=%d",
         max_runs,
         interval_seconds,
         MIN_TRAIN_MALWARE,
         MIN_TRAIN_BENIGN,
     )
     for run_idx in range(1, max_runs + 1):
-        logger.info("Bootstrap pass %d/%d", run_idx, max_runs)
+        phase_log(logger, PHASE_BOOTSTRAP, "Pass %d/%d", run_idx, max_runs)
         final = run_pipeline()
         counts = db.get_tracker().count_by_label()
         if training_targets_met(counts) and model_bundle_ready(load_bundle()):
-            logger.info("Bootstrap complete: model bundle is ready")
+            phase_log(logger, PHASE_BOOTSTRAP, "Complete: model bundle is ready")
             return final
 
         n_mal = counts.get(1, 0)
         n_ben = counts.get(0, 0)
-        logger.info(
-            "Bootstrap awaiting model: malware=%d/%d benign=%d/%d",
+        phase_log(
+            logger,
+            PHASE_BOOTSTRAP,
+            "Awaiting model: malware=%d/%d benign=%d/%d",
             n_mal,
             MIN_TRAIN_MALWARE,
             n_ben,
             MIN_TRAIN_BENIGN,
         )
         if run_idx < max_runs and interval_seconds > 0:
+            phase_log(
+                logger,
+                PHASE_BOOTSTRAP,
+                "Sleeping %ds before pass %d/%d",
+                interval_seconds,
+                run_idx + 1,
+                max_runs,
+            )
             time.sleep(interval_seconds)
 
     logger.warning(
-        "Bootstrap stopped before model was ready; increase BOOTSTRAP_MAX_RUNS in src/config.py"
+        "[%s] Stopped before model was ready; increase BOOTSTRAP_MAX_RUNS in src/config.py",
+        PHASE_BOOTSTRAP,
     )
     return final
 
@@ -232,6 +259,7 @@ def main() -> None:
         help="Optional scheduler YAML (merged over env vars)",
     )
     args = parser.parse_args()
+    configure_logging()
 
     if args.daemon:
         sched_cfg = load_scheduler_config(args.config)

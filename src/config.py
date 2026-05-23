@@ -1,15 +1,15 @@
-"""Application configuration and paths."""
+"""Application configuration and paths.
+
+Edit tuning constants here; secrets live in `.env` (see `.env.example`).
+"""
 
 import os
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
-# MalwareBazaar API
-API_URL = "https://mb-api.abuse.ch/api/v1/"
-ZIP_PASSWORD = "infected"
+# --- Paths and storage (local vs Docker) ---
 
-# Sandbox: container vs local dev
 _in_container = Path("/data").exists() and os.getenv("AMD_AGENT_CONTAINER") == "1"
 if _in_container:
     SANDBOX_DIR = Path("/tmp/sandbox")
@@ -20,7 +20,9 @@ if _in_container:
     EVAL_LOG_PATH = Path("/data/evaluation_log.jsonl")
     EVAL_STATE_PATH = Path("/data/evaluation_state.json")
     DRIFT_LOG_PATH = Path("/data/drift_log.jsonl")
+    LOG_PATH = Path("/data/logs/amd-agent.log")
     FIGURES_DIR = Path("/data/figures")
+    REPOS_DIR = Path("/data/repos")
 else:
     SANDBOX_DIR = PROJECT_ROOT / "data" / "sandbox"
     DB_PATH = PROJECT_ROOT / "data" / "malware_tracker.db"
@@ -30,13 +32,62 @@ else:
     EVAL_LOG_PATH = PROJECT_ROOT / "data" / "evaluation_log.jsonl"
     EVAL_STATE_PATH = PROJECT_ROOT / "data" / "evaluation_state.json"
     DRIFT_LOG_PATH = PROJECT_ROOT / "data" / "drift_log.jsonl"
+    LOG_PATH = PROJECT_ROOT / "data" / "logs" / "amd-agent.log"
     FIGURES_DIR = PROJECT_ROOT / "report" / "figures"
+    REPOS_DIR = PROJECT_ROOT / "data" / "repos"
+
+# --- Secrets and environment (see .env.example) ---
+
+# MALWAREBAZAAR_AUTH_KEY, GITHUB_TOKEN, MALSHARE_API_KEY: use get_*() helpers below.
+OTX_API_KEY = os.getenv("OTX_API_KEY", "").strip()
+OLLAMA_BASE_URL = os.getenv("AMD_OLLAMA_BASE_URL").strip()
+OLLAMA_MODEL = os.getenv("AMD_OLLAMA_MODEL").strip()
+
+# --- Scheduler and bootstrap ---
+
+# Daemon: `python -m src.graph --daemon`
+SCHED_ENABLED = False
+SCHED_INTERVAL_SECONDS = 1800
+SCHED_MAX_RUNS: int | None = None
+SCHED_RUN_ON_START = True
+SCHED_JITTER_SECONDS = 60
+SCHED_ERROR_BACKOFF_SECONDS = 60
+SCHED_MAX_BACKOFF_SECONDS = 3600
+
+# Bootstrap: `python -m src.graph --bootstrap`
+BOOTSTRAP_MAX_RUNS = 60
+BOOTSTRAP_INTERVAL_SECONDS = 10
+
+# --- Logging ---
+
+VERBOSE = False  # True = detailed per-item console logs (file always full detail)
+LOG_MAX_BYTES = 10 * 1024 * 1024
+LOG_BACKUP_COUNT = 5
+
+# Ollama request/response trace (full payloads always in amd-agent.log)
+OLLAMA_LOG_DETAIL = True
+OLLAMA_LOG_MAX_CHARS = 8000
+OLLAMA_LOG_CONSOLE_PREVIEW = 500
+
+# --- Feature flags ---
+
+ALLOW_LOCAL_BENIGN = False
+MALSHARE_ENABLED = False
+MB_FALLBACK_MALSHARE = False
+PE_SOURCE_DISCOVERY_ENABLED = False
+CTI_SEED_SOURCES_ENABLED = True
+OLLAMA_ENABLED = True
+OLLAMA_SOURCE_SELECTION_ENABLED = True
+FORCED_BENIGN_PROVIDER: str | None = None
+
+# --- Machine learning (training, FPR, drift, MADAR, feature version) ---
 
 REPLAY_BUDGET = 3000
 MIN_TRAIN_MALWARE = 25
 MIN_TRAIN_BENIGN = 25
 PE_FETCH_LIMIT = 10
 THRESHOLD_RETRAIN_MIN_NEW_SAMPLES = 20  # retrain when N untrained featured samples accumulate
+
 TARGET_FPR = 0.001  # production ceiling (5k+ trainable benign in DB)
 TARGET_FPR_BOOTSTRAP = 0.05  # <1k benign
 TARGET_FPR_GROWTH = 0.01  # 1k–4,999 benign
@@ -53,40 +104,19 @@ def get_dynamic_target_fpr(num_benign_samples: int) -> float:
     return TARGET_FPR
 
 
-FEATURE_SET_VERSION = "ember_static_v1"
-FEATURE_DIM = 2304
+FEATURE_SELECTION_K = 384
+OPTUNA_TRIALS = 25
+OPTUNA_TIMEOUT = 300
+REPLAY_FRACTION = 0.3  # DEPRECATED
 
-# Benign / malware collection balance
-MIN_BENIGN_FOR_FPR = MIN_TRAIN_BENIGN
-TARGET_MALWARE_BENIGN_RATIO = 1.0
-BENIGN_PROVIDER_NAMES = ("sysinternals", "github", "benign_net")
+# Drift (DEV: sensitive — production targets noted inline)
+ADWIN_DELTA = 0.002
+DRIFT_WINDOW_DAYS = 0  # 0 = disable time pruning (_prune_time_window no-op)
+DRIFT_MIN_WINDOW_SAMPLES = 5  # multivariate needs len(vectors) >= 10 (5 * 2)
+DRIFT_MEAN_SHIFT_THRESHOLD = 0.2  # production: 1.5
+DRIFT_CORR_SHIFT_THRESHOLD = 0.1  # production: 0.35
 
-# --- Application defaults (edit here; not loaded from .env) ---
-
-# Scheduler (`python -m src.graph --daemon`)
-SCHED_ENABLED = False
-SCHED_INTERVAL_SECONDS = 1800
-SCHED_MAX_RUNS: int | None = None
-SCHED_RUN_ON_START = True
-SCHED_JITTER_SECONDS = 60
-SCHED_ERROR_BACKOFF_SECONDS = 60
-SCHED_MAX_BACKOFF_SECONDS = 3600
-
-# Bootstrap (`python -m src.graph --bootstrap`)
-BOOTSTRAP_MAX_RUNS = 60
-BOOTSTRAP_INTERVAL_SECONDS = 10
-
-# Feature flags
-ALLOW_LOCAL_BENIGN = False
-MALSHARE_ENABLED = False
-MB_FALLBACK_MALSHARE = False
-PE_SOURCE_DISCOVERY_ENABLED = False
-CTI_SEED_SOURCES_ENABLED = True
-OLLAMA_ENABLED = True
-OLLAMA_SOURCE_SELECTION_ENABLED = True
-FORCED_BENIGN_PROVIDER: str | None = None
-
-# MADAR / model continuation
+# MADAR replay and LightGBM continuation
 MADAR_CONTAMINATION = 0.1
 MADAR_ANOMALOUS_RATIO = 0.5
 MADAR_CLASS_RATIO = 0.5
@@ -95,27 +125,35 @@ CONTINUATION_TREES = 50
 MAX_TOTAL_TREES = 500
 MODEL_ARCHIVE_DEPTH = 5
 
-# Drift / ML tuning (DEV: sensitive — revert before production: 60 / 50 / 1.5 / 0.35)
-ADWIN_DELTA = 0.002
-DRIFT_WINDOW_DAYS = 0  # 0 = disable time pruning (_prune_time_window no-op)
-DRIFT_MIN_WINDOW_SAMPLES = 5  # multivariate needs len(vectors) >= 10 (5 * 2)
-DRIFT_MEAN_SHIFT_THRESHOLD = 0.2  # production: 1.5
-DRIFT_CORR_SHIFT_THRESHOLD = 0.1  # production: 0.35
-REPLAY_FRACTION = 0.3  # DEPRECATED
-FEATURE_SELECTION_K = 384
-OPTUNA_TRIALS = 25
-OPTUNA_TIMEOUT = 300
+FEATURE_SET_VERSION = "ember_static_v1"
+FEATURE_DIM = 2304
 
-# Semantic filter thresholds
+# --- Semantic hash filter (Ollama-assisted CTI) ---
+
 SEMANTIC_MIN_CONFIDENCE = 0.6
 SEMANTIC_REQUIRE_TECHNICAL_REPORT = False
 
-# Evaluation (TESSERACT)
+# --- Evaluation (TESSERACT) ---
+
 EVAL_EVERY_RUNS = 10
 EVAL_SKIP_BOOTSTRAP = True
 TESSERACT_MIXED_UNTIL_HEALTHY = True
 
-# Intel polling / provider cooldown
+# --- Collection, intel, and discovery ---
+
+MIN_BENIGN_FOR_FPR = MIN_TRAIN_BENIGN
+TARGET_MALWARE_BENIGN_RATIO = 1.0
+BENIGN_PROVIDER_NAMES = ("sysinternals", "github", "benign_net")
+IMBALANCE_ALERT_RATIO = 0.5
+
+MALWARE_FALLBACK_PROVIDERS = ("malshare", "threatfox", "otx_pulse_cti")
+FALLBACK_PE_CHECK_MULT = 1
+PE_DOWNLOAD_MAX_BYTES = 250000
+BENIGN_NET_REPO_URL = "https://github.com/bormaa/Benign-NET.git"
+BENIGN_NET_MAX_DISCOVER = 20
+PE_DISCOVERY_MAX_URLS = 8
+MIN_PE_SOURCES = 3
+
 INTEL_MIN_POLL_INTERVAL = 60
 INTEL_MAX_POLL_INTERVAL = 3600
 PROVIDER_COOLDOWN_ZERO_RUNS = 3
@@ -123,7 +161,11 @@ PROVIDER_COOLDOWN_SECONDS = 43200
 PROVIDER_COOLDOWN_MIN_ATTEMPTS = 5
 STEADY_BENIGN_EVERY_N = 4
 
-# MalwareBazaar fair-use
+# --- External APIs (MalwareBazaar, CTI, OTX, Ollama, benign sources) ---
+
+# MalwareBazaar
+API_URL = "https://mb-api.abuse.ch/api/v1/"
+ZIP_PASSWORD = "infected"
 MB_CIRCUIT_FAILURE_THRESHOLD = 3
 MB_CIRCUIT_OPEN_SECONDS = 120.0
 MB_CIRCUIT_OPEN_SECONDS_429 = 3600.0
@@ -136,7 +178,7 @@ MB_INFO_CACHE_TTL_DAYS = 30
 MB_DAILY_DOWNLOAD_LIMIT = 1900
 MB_MAX_INFO_CALLS_PER_RUN = 0
 
-# CTI scrape resilience
+# CTI web fetch
 CTI_HOST_BLOCK_SECONDS_403 = 900.0
 CTI_HOST_BLOCK_SECONDS_429 = 3600.0
 CTI_HOST_BLOCK_SECONDS_TRANSPORT = 300.0
@@ -148,38 +190,21 @@ CTI_DOWNLOAD_ALLOWLIST = (
     "objects.githubusercontent.com",
 )
 
-# Collection / discovery
-MALWARE_FALLBACK_PROVIDERS = ("malshare", "threatfox", "otx_pulse_cti")
-FALLBACK_PE_CHECK_MULT = 1
-PE_DOWNLOAD_MAX_BYTES = 250000
-BENIGN_NET_REPO_URL = "https://github.com/bormaa/Benign-NET.git"
-BENIGN_NET_MAX_DISCOVER = 20
-PE_DISCOVERY_MAX_URLS = 8
-MIN_PE_SOURCES = 3
-
-# AlienVault OTX
-OTX_API_KEY = os.getenv("OTX_API_KEY", "").strip()
+# AlienVault OTX (API key: OTX_API_KEY in secrets section above)
 OTX_ENABLED = True
 OTX_PULSE_DAYS = 7
 OTX_PULSE_LIMIT = 10
 OTX_PULSE_MAX_HASHES = 30
-IMBALANCE_ALERT_RATIO = 0.5
 
-# Explainability (drift narrative via Ollama)
+# Ollama model behavior
 OLLAMA_TIMEOUT = 8.0
 REPORT_LANGUAGE = "English"
 
-# --- Secrets and deployment endpoints (from environment only) ---
-OLLAMA_BASE_URL = os.getenv("AMD_OLLAMA_BASE_URL").strip()
-OLLAMA_MODEL = os.getenv("AMD_OLLAMA_MODEL").strip()
-
-# Sysinternals benign source
+# Benign PE sources
 SYSINTERNALS_BASE_URLS = (
     "https://live.sysinternals.com/",
     "https://live.sysinternals.com/tools/",
 )
-
-# GitHub Releases benign source
 GITHUB_API_URL = "https://api.github.com"
 GITHUB_BENIGN_REPOS: list[tuple[str, str]] = [
     ("notepad-plus-plus", "notepad-plus-plus"),
@@ -187,6 +212,8 @@ GITHUB_BENIGN_REPOS: list[tuple[str, str]] = [
     ("git-for-windows", "git"),
     ("microsoft", "PowerToys"),
 ]
+
+# --- Static feature name tables (do not edit by hand) ---
 
 EXEC_API_NAMES = frozenset(
     {
@@ -316,6 +343,8 @@ FEATURE_NAMES = (
 if len(FEATURE_NAMES) != FEATURE_DIM:
     raise RuntimeError(f"FEATURE_NAMES length {len(FEATURE_NAMES)} != FEATURE_DIM {FEATURE_DIM}")
 
+# --- Helpers ---
+
 
 def ensure_dirs() -> None:
     """Create required directories."""
@@ -327,6 +356,7 @@ def ensure_dirs() -> None:
         FIGURES_DIR,
         EVAL_STATE_PATH.parent,
         DRIFT_LOG_PATH.parent,
+        LOG_PATH.parent,
         REPOS_DIR,
     ):
         path.mkdir(parents=True, exist_ok=True)
@@ -368,8 +398,3 @@ def pe_source_discovery_enabled() -> bool:
 
 def ollama_source_selection_enabled() -> bool:
     return OLLAMA_SOURCE_SELECTION_ENABLED
-
-
-REPOS_DIR = PROJECT_ROOT / "data" / "repos"
-if _in_container:
-    REPOS_DIR = Path("/data/repos")

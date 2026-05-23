@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import logging
 import math
 from pathlib import Path
 from typing import Any
@@ -31,9 +30,10 @@ from src.config import (
 )
 import src.db.tracker as db
 from src.ml.features import extract_pe_features, features_to_vector, vectorize_batch
+from src.log import PHASE_ML, get_logger, phase_log, vlog
 from src.ml.splits import stratified_split, temporal_split
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 def resolve_target_fpr(benign_count: int | None = None) -> float:
@@ -71,7 +71,8 @@ def load_bundle(path: Path | None = None) -> dict[str, Any] | None:
     bundle = joblib.load(p)
     if not _bundle_feature_compatible(bundle):
         logger.warning(
-            "Model feature set is stale; expected %s/%d, got %s/%s",
+            "[%s] Model feature set is stale; expected %s/%d, got %s/%s",
+            PHASE_ML,
             FEATURE_SET_VERSION,
             FEATURE_DIM,
             bundle.get("feature_set_version"),
@@ -283,7 +284,7 @@ def _rank_features_xgboost(X_train: np.ndarray, y_train: np.ndarray, k: int) -> 
             if importances.shape[0] == X_train.shape[1] and np.any(importances > 0):
                 return np.argsort(importances)[::-1][:k].astype(int).tolist()
         except Exception as exc:
-            logger.warning("XGBoost feature ranking failed; falling back to variance: %s", exc)
+            logger.warning("[%s] XGBoost feature ranking failed; falling back to variance: %s", PHASE_ML, exc)
 
     variances = np.var(X_train, axis=0)
     if not np.any(variances > 0):
@@ -356,7 +357,7 @@ def _optimize_lightgbm_params(
         if study.best_params:
             return {**base, **study.best_params}
     except Exception as exc:
-        logger.warning("Optuna tuning failed; using default LightGBM params: %s", exc)
+        logger.warning("[%s] Optuna tuning failed; using default LightGBM params: %s", PHASE_ML, exc)
     return base
 
 
@@ -418,7 +419,9 @@ def fit_model_artifact(
     if len(np.unique(y_train)) < 2:
         raise ValueError("training split has fewer than 2 classes")
     target_fpr = resolve_target_fpr()
-    logger.info(
+    vlog(
+        logger,
+        "info",
         "Threshold target FPR=%.4f (trainable benign in DB=%d)",
         target_fpr,
         db.get_tracker().count_by_label().get(0, 0),
@@ -456,7 +459,9 @@ def fit_model_artifact(
         threshold_target_fpr=target_fpr,
     )
     if not threshold_meta["threshold_target_supported"] and len(y_val):
-        logger.info(
+        vlog(
+            logger,
+            "info",
             "Threshold target FPR %.4f is below validation resolution %.4f "
             "(benign=%d); treating threshold as small-sample calibration",
             target_fpr,
@@ -498,7 +503,9 @@ def continue_training(
         raise ValueError("training split has fewer than 2 classes")
 
     target_fpr = resolve_target_fpr()
-    logger.info(
+    vlog(
+        logger,
+        "info",
         "Continuation threshold target FPR=%.4f (trainable benign in DB=%d)",
         target_fpr,
         db.get_tracker().count_by_label().get(0, 0),
@@ -611,11 +618,11 @@ def _refresh_stale_features(tracker: db.MalwareTracker, row: dict[str, Any]) -> 
         return row.get("features")
     file_path = row.get("file_path")
     if not file_path or not Path(file_path).exists():
-        logger.info("Skipping stale feature row without readable file: %s", row.get("sha256", "")[:12])
+        vlog(logger, "info", "Skipping stale feature row without readable file: %s", row.get("sha256", "")[:12])
         return None
     features = extract_pe_features(file_path)
     if features is None:
-        logger.info("Skipping stale feature row that failed re-extraction: %s", row.get("sha256", "")[:12])
+        vlog(logger, "info", "Skipping stale feature row that failed re-extraction: %s", row.get("sha256", "")[:12])
         return None
     tracker.update_features(str(row["sha256"]), features)
     return features
@@ -639,7 +646,7 @@ def build_training_arrays(
         X_list.append(features_to_vector(feats))
         y_list.append(int(row["label"]))
     if refreshed:
-        logger.info("Re-extracted %d stale feature row(s) for %s", refreshed, FEATURE_SET_VERSION)
+        phase_log(logger, PHASE_ML, "Re-extracted %d stale feature row(s) for %s", refreshed, FEATURE_SET_VERSION)
     if not X_list:
         return np.empty((0, len(FEATURE_NAMES))), np.array([]), []
     return np.vstack(X_list), np.array(y_list, dtype=int), hashes
@@ -673,7 +680,9 @@ def cold_start_train(tracker: db.MalwareTracker) -> dict[str, Any] | None:
     n_mal = counts.get(1, 0)
     n_ben = counts.get(0, 0)
     if not training_targets_met(counts):
-        logger.info(
+        vlog(
+            logger,
+            "info",
             "Cold-start skipped: malware=%d/%d benign=%d/%d",
             n_mal,
             MIN_TRAIN_MALWARE,
@@ -690,8 +699,9 @@ def cold_start_train(tracker: db.MalwareTracker) -> dict[str, Any] | None:
     )
     if len(np.unique(y_train)) < 2:
         logger.warning(
-            "Cold-start skipped: stratified train split has fewer than 2 classes "
+            "[%s] Cold-start skipped: stratified train split has fewer than 2 classes "
             "(n_train=%d, classes=%s)",
+            PHASE_ML,
             len(y_train),
             np.unique(y_train).tolist(),
         )
@@ -708,7 +718,7 @@ def cold_start_train(tracker: db.MalwareTracker) -> dict[str, Any] | None:
             split_mode="stratified",
         )
     except ValueError as exc:
-        logger.warning("Cold-start skipped: %s", exc)
+        logger.warning("[%s] Cold-start skipped: %s", PHASE_ML, exc)
         return None
 
     _, _, _, _, X_sanity, y_sanity = stratified_split(
@@ -725,10 +735,12 @@ def cold_start_train(tracker: db.MalwareTracker) -> dict[str, Any] | None:
         meta["sanity_split_mode"] = "stratified"
         meta["sanity_class_counts"] = class_counts_from_labels(y_sanity)
         bundle["split_metadata"] = meta
-        logger.info("Bootstrap stratified sanity eval: %s", sanity)
+        phase_log(logger, PHASE_ML, "Bootstrap stratified sanity eval: %s", sanity)
 
     _save_bundle_dict(bundle)
-    logger.info(
+    phase_log(
+        logger,
+        PHASE_ML,
         "Cold-start model trained on %d samples (train=%d val=%d test=%d selected_features=%d)",
         len(y),
         len(y_train),
@@ -749,8 +761,9 @@ def retrain_model(
     """Retrain LightGBM with a chronological validation split."""
     if len(np.unique(y)) < 2:
         logger.warning(
-            "Retrain skipped: y contains fewer than 2 classes (n=%d, classes=%s); "
+            "[%s] Retrain skipped: y contains fewer than 2 classes (n=%d, classes=%s); "
             "reusing existing model bundle",
+            PHASE_ML,
             len(y),
             np.unique(y).tolist(),
         )
@@ -765,8 +778,9 @@ def retrain_model(
     )
     if len(np.unique(y_train)) < 2:
         logger.warning(
-            "Retrain skipped: y_train contains fewer than 2 classes "
+            "[%s] Retrain skipped: y_train contains fewer than 2 classes "
             "(n_train=%d, classes=%s); reusing existing model bundle",
+            PHASE_ML,
             len(y_train),
             np.unique(y_train).tolist(),
         )
@@ -792,7 +806,7 @@ def retrain_model(
             split_mode="temporal",
         )
     except ValueError as exc:
-        logger.warning("Retrain skipped: %s", exc)
+        logger.warning("[%s] Retrain skipped: %s", PHASE_ML, exc)
         return load_bundle()
     _save_bundle_dict(bundle)
     return load_bundle()

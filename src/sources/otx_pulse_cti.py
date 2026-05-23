@@ -8,17 +8,17 @@ SampleCandidate objects for download.
 
 from __future__ import annotations
 
-import logging
 from typing import Any
 
 import src.db.tracker as db
 from src.config import OTX_API_KEY, OTX_ENABLED, OTX_PULSE_DAYS, OTX_PULSE_LIMIT, OTX_PULSE_MAX_HASHES
 from src.llm import semantic_filter_hashes
+from src.log import PHASE_DISCOVERY, get_logger, phase_log, task_status, vlog
 from src.sources.base import PESourceProvider, SampleCandidate
 from src.tools import malwarebazaar_api as mb
 from src.tools.pe_download import download_pe_candidate
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class OTXPulseCTIProvider(PESourceProvider):
@@ -32,17 +32,18 @@ class OTXPulseCTIProvider(PESourceProvider):
         queries: list[str] | None = None,
     ) -> list[SampleCandidate]:
         if not OTX_ENABLED or not OTX_API_KEY:
-            logger.info("OTX disabled or API key not set; skipping pulse discovery")
+            phase_log(logger, PHASE_DISCOVERY, "OTX disabled or API key not set; skipping")
             return []
 
         from src.tools.clients.otx_api_client import OTXApiClient
 
         client = OTXApiClient(OTX_API_KEY)
-        pulses = client.get_recent_pulses(days=OTX_PULSE_DAYS, limit=OTX_PULSE_LIMIT)
+        with task_status(PHASE_DISCOVERY, "OTX: fetching recent pulses"):
+            pulses = client.get_recent_pulses(days=OTX_PULSE_DAYS, limit=OTX_PULSE_LIMIT)
         if not pulses:
+            phase_log(logger, PHASE_DISCOVERY, "OTX: no pulses returned")
             return []
 
-        # Move tracker init here so we can check MB cache during evidence building
         tracker = db.get_tracker()
 
         evidence: list[dict[str, Any]] = []
@@ -59,8 +60,6 @@ class OTXPulseCTIProvider(PESourceProvider):
                 if sha in seen_hashes:
                     continue
                 seen_hashes.add(sha)
-                # Skip hashes already confirmed non-PE in MB cache — avoids
-                # repeating the same failed lookups every round.
                 if tracker.get_mb_pe_verdict(sha) is False:
                     skipped_cached += 1
                     continue
@@ -70,32 +69,34 @@ class OTXPulseCTIProvider(PESourceProvider):
                     "context": raw_text[:2000],
                 })
 
-        if skipped_cached:
-            logger.info("OTX skipped %d hashes already cached as non-PE", skipped_cached)
-
         if not evidence:
-            logger.info("OTX pulses contained no SHA256 file hash indicators")
+            phase_log(logger, PHASE_DISCOVERY, "OTX: no SHA256 file hash indicators in pulses")
             return []
-        logger.info("OTX collected %d unique hashes (cap %d) from %d pulse(s)",
-                     len(evidence), max_hashes, len(pulses))
 
-        # MB PE check first — cheap cached API call eliminates non-PE hashes
-        # before spending Ollama cycles on them.
         pe_evidence: list[dict[str, Any]] = []
-        for item in evidence:
-            sha = str(item.get("sha256", "")).lower()
-            if tracker.is_downloaded(sha) or tracker.is_corrupted(sha) or tracker.is_pending(sha):
-                continue
-            try:
-                if mb.is_pe_hash(sha):
-                    pe_evidence.append(item)
-            except mb.MalwareBazaarUnavailable:
-                logger.warning("MB circuit open; aborting OTX PE pre-check")
-                break
-        logger.info("OTX MB pre-filter: %d/%d hashes confirmed PE",
-                     len(pe_evidence), len(evidence))
+        with task_status(PHASE_DISCOVERY, f"OTX: MB pre-filter on {len(evidence)} hashes"):
+            for item in evidence:
+                sha = str(item.get("sha256", "")).lower()
+                if tracker.is_downloaded(sha) or tracker.is_corrupted(sha) or tracker.is_pending(sha):
+                    continue
+                try:
+                    if mb.is_pe_hash(sha):
+                        pe_evidence.append(item)
+                except mb.MalwareBazaarUnavailable:
+                    logger.warning("[%s] MB circuit open; aborting OTX PE pre-check", PHASE_DISCOVERY)
+                    break
+
+        if skipped_cached:
+            vlog(logger, "info", "OTX skipped %d hashes already cached as non-PE", skipped_cached)
 
         if not pe_evidence:
+            phase_log(
+                logger,
+                PHASE_DISCOVERY,
+                "otx_pulse_cti: 0 PE hashes from %d collected (%d cached non-PE)",
+                len(evidence),
+                skipped_cached,
+            )
             return []
 
         filtered = semantic_filter_hashes(pe_evidence)
@@ -123,7 +124,15 @@ class OTXPulseCTIProvider(PESourceProvider):
                     },
                 )
             )
-        logger.info("OTX pulse discovery found %d candidate(s)", len(candidates))
+        phase_log(
+            logger,
+            PHASE_DISCOVERY,
+            "otx_pulse_cti: %d candidate(s) from %d PE / %d hashes / %d pulse(s)",
+            len(candidates),
+            len(pe_evidence),
+            len(evidence),
+            len(pulses),
+        )
         return candidates
 
     def download(self, candidate: SampleCandidate) -> bytes:

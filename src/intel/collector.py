@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import logging
 import re
 from typing import Any
 
@@ -21,13 +20,14 @@ from src.intel.feed_discovery import (
 from src.intel.rss import parse_feed_entries
 from src.intel.seed_sources import seed_curated_sources
 from src.intel.source_store import IntelSourceStore, get_intel_source_store
+from src.log import PHASE_DISCOVERY, get_logger, phase_log, vlog
 from src.llm import semantic_filter_hashes
 from src.sources.base import SampleCandidate
 from src.tools import malwarebazaar_api as mb
 from src.tools.cti_search import extract_hash_contexts, extract_pe_urls, fetch_public_text
 from src.tools.update import insert_pending_hash
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 SHA256_RE = re.compile(r"^[a-fA-F0-9]{64}$")
 
@@ -78,7 +78,7 @@ class ThreatIntelCollector:
             url = str(source["url"])
             source_type = str(source.get("source_type") or "rss")
             if source_type != "rss" or is_low_signal_cti_url(url) or not is_precise_intel_source_url(url):
-                logger.info("Disabling low-signal CTI source: %s", url)
+                vlog(logger, "info", "Disabling low-signal CTI source: %s", url)
                 self.sources.disable_source(source_id)
                 poll_stats["sources_disabled"] += 1
                 continue
@@ -151,6 +151,14 @@ class ThreatIntelCollector:
         out = raw[:max_candidates]
         poll_stats["returned"] = len(out)
         self.last_native_poll_stats = poll_stats
+        phase_log(
+            logger,
+            PHASE_DISCOVERY,
+            "CTI poll: %d sources polled, %d candidates, %d disabled",
+            poll_stats["sources_polled"],
+            poll_stats["returned"],
+            poll_stats["sources_disabled"],
+        )
         return out
 
     def validate_and_queue(
@@ -162,7 +170,7 @@ class ThreatIntelCollector:
         from src.collection.context import build_collection_context
 
         if build_collection_context(self.tracker).phase == "bootstrap":
-            logger.info("validate_and_queue skipped: collection phase is bootstrap")
+            phase_log(logger, PHASE_DISCOVERY, "validate_and_queue skipped (bootstrap phase)")
             return {
                 "seen": len(candidates),
                 "queued": 0,
@@ -264,7 +272,7 @@ class ThreatIntelCollector:
                     stats["not_pe"] += 1
                     continue
             except mb.MalwareBazaarUnavailable:
-                logger.warning("MB circuit open; aborting validate_and_queue PE checks")
+                logger.warning("[%s] MB circuit open; aborting validate_and_queue PE checks", PHASE_DISCOVERY)
                 break
 
             insert_pending_hash(self.tracker, sha, label=1)
@@ -297,6 +305,15 @@ class ThreatIntelCollector:
                     bootstrap=bootstrap,
                 )
 
+        phase_log(
+            logger,
+            PHASE_DISCOVERY,
+            "CTI queue: %d queued, %d existing, %d rejected (seen=%d)",
+            stats["queued"],
+            stats["existing"],
+            stats["rejected"],
+            stats["seen"],
+        )
         return stats
 
     def pending_to_candidates(self, limit: int | None = None) -> list[dict[str, Any]]:
@@ -374,7 +391,7 @@ class ThreatIntelCollector:
         except mb.MalwareBazaarUnavailable:
             raise
         except Exception as exc:
-            logger.info("MB is_pe_hash failed for %s: %s", sha, exc)
+            vlog(logger, "info", "MB is_pe_hash failed for %s: %s", sha, exc)
             return False
 
     def _bootstrap_mode(self) -> bool:

@@ -2,14 +2,15 @@
 
 from __future__ import annotations
 
-import logging
 import re
 from typing import Any
 
 from src.config import get_auth_key
 from src.tools.clients.http_client_base import HttpApiClient
 
-logger = logging.getLogger(__name__)
+from src.log import PHASE_API, get_logger, phase_log, vlog
+
+logger = get_logger(__name__)
 
 THREATFOX_API_URL = "https://threatfox-api.abuse.ch/api/v1/"
 SHA256_IOC_TYPES = frozenset({"sha256_hash", "hash", "file_hash", "sha256"})
@@ -59,7 +60,7 @@ class ThreatFoxClient(HttpApiClient):
         days = max(1, min(int(days), 7))
         payload = self._post_json({"query": "get_iocs", "days": days})
         if payload.get("query_status") != "ok":
-            logger.warning("ThreatFox get_iocs status=%s", payload.get("query_status"))
+            vlog(logger, "warning", "ThreatFox get_iocs status=%s", payload.get("query_status"))
             return []
 
         results: list[dict[str, Any]] = []
@@ -92,7 +93,7 @@ class ThreatFoxClient(HttpApiClient):
         days = max(1, min(int(days), 7))
         payload = self._post_json({"query": "get_iocs", "days": days})
         if payload.get("query_status") != "ok":
-            logger.warning("ThreatFox get_iocs (social) status=%s", payload.get("query_status"))
+            vlog(logger, "warning", "ThreatFox get_iocs (social) status=%s", payload.get("query_status"))
             return []
 
         results: list[dict[str, Any]] = []

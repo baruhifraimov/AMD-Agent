@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import hashlib
-import logging
 import math
 import mmap
 import re
@@ -28,7 +27,9 @@ from src.config import (
     SECTION_HASH_FEATURE_NAMES,
 )
 
-logger = logging.getLogger(__name__)
+from src.log import PHASE_EXTRACTION, get_logger, phase_log, vlog
+
+logger = get_logger(__name__)
 
 try:  # Optional at runtime until Docker image is rebuilt.
     import capstone
@@ -430,7 +431,7 @@ def extract_pe_features_with_error(path: str | Path) -> tuple[dict[str, Any] | N
     try:
         file_bytes = _read_file_bytes(path)
     except OSError as exc:
-        logger.warning("failed to read %s: %s", path, exc)
+        logger.warning("[%s] failed to read %s: %s", PHASE_EXTRACTION, path, exc)
         return None, str(exc)
 
     features = _empty_features()
@@ -451,7 +452,7 @@ def extract_pe_features_with_error(path: str | Path) -> tuple[dict[str, Any] | N
         ]
         pe.parse_data_directories(directories=directories)
     except Exception as exc:
-        logger.warning("pefile parse failed for %s: %s", path, exc)
+        logger.warning("[%s] pefile parse failed for %s: %s", PHASE_EXTRACTION, path, exc)
         return None, str(exc)
 
     try:
@@ -462,7 +463,7 @@ def extract_pe_features_with_error(path: str | Path) -> tuple[dict[str, Any] | N
         features["sha256"] = path.stem if len(path.stem) == 64 else ""
         return features, None
     except Exception as exc:
-        logger.warning("feature extraction failed for %s: %s", path, exc)
+        logger.warning("[%s] feature extraction failed for %s: %s", PHASE_EXTRACTION, path, exc)
         return None, str(exc)
     finally:
         try:

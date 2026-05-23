@@ -3,18 +3,18 @@
 from __future__ import annotations
 
 import hashlib
-import logging
 
 import src.db.tracker as db
 from src.collection.provider_stats import bump_provider
 from src.intel.collector import ThreatIntelCollector
+from src.log import PHASE_FETCH, get_logger, phase_log, task_status, vlog
 from src.sources.base import SampleCandidate
 from src.state import AgentState
 from src.tools.fetch import save_pe_to_sandbox
 from src.tools.pe_download import download_pe_candidate
 from src.tools.update import mark_corrupted
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 def binary_fetch(state: AgentState) -> dict:
@@ -29,111 +29,132 @@ def binary_fetch(state: AgentState) -> dict:
     non_pe = 0
     skipped = 0
     corrupted = 0
+    n_candidates = len(state.sample_candidates)
 
-    for raw in state.sample_candidates:
-        candidate = SampleCandidate.from_dict(raw)
-        candidate_key = str(candidate.metadata.get("candidate_key") or "").strip()
-        try:
-            candidate_sha = str(candidate.download_ref.get("sha256") or candidate.external_id).lower()
-            source_url = (
-                candidate.download_ref.get("url")
-                or candidate.download_ref.get("fallback_url")
-                or candidate.download_ref.get("path")
-                or candidate.metadata.get("source_url")
-                or ""
-            )
-            if not candidate_key:
-                ref = source_url or candidate_sha or str(candidate.external_id)
-                candidate_key = f"{candidate.provider}:{ref}".lower()
-            if len(candidate_sha) == 64 and tracker.is_corrupted(candidate_sha):
-                logger.info("Skipping previously corrupted sample: %s", candidate_sha)
-                bump_provider(metrics, candidate.provider, candidate.expected_label, failed=1)
-                tracker.record_candidate_outcome(candidate_key, status="corrupted")
-                skipped += 1
-                continue
-            if len(candidate_sha) == 64 and tracker.is_downloaded(candidate_sha):
-                if source_url:
+    with task_status(PHASE_FETCH, f"Downloading {n_candidates} candidates"):
+        for raw in state.sample_candidates:
+            candidate = SampleCandidate.from_dict(raw)
+            candidate_key = str(candidate.metadata.get("candidate_key") or "").strip()
+            try:
+                candidate_sha = str(candidate.download_ref.get("sha256") or candidate.external_id).lower()
+                source_url = (
+                    candidate.download_ref.get("url")
+                    or candidate.download_ref.get("fallback_url")
+                    or candidate.download_ref.get("path")
+                    or candidate.metadata.get("source_url")
+                    or ""
+                )
+                if not candidate_key:
+                    ref = source_url or candidate_sha or str(candidate.external_id)
+                    candidate_key = f"{candidate.provider}:{ref}".lower()
+                if len(candidate_sha) == 64 and tracker.is_corrupted(candidate_sha):
+                    vlog(logger, "info", "Skipping previously corrupted sample: %s", candidate_sha)
+                    bump_provider(metrics, candidate.provider, candidate.expected_label, failed=1)
+                    tracker.record_candidate_outcome(candidate_key, status="corrupted")
+                    skipped += 1
+                    continue
+                if len(candidate_sha) == 64 and tracker.is_downloaded(candidate_sha):
+                    if source_url:
+                        tracker.record_sample_source(
+                            candidate_sha,
+                            source_provider=candidate.provider,
+                            source_url=str(source_url),
+                        )
+                    vlog(logger, "info", "Already downloaded, skipping before fetch: %s", candidate_sha)
+                    bump_provider(metrics, candidate.provider, candidate.expected_label, duplicate=1)
+                    tracker.record_candidate_outcome(candidate_key, status="duplicate", sha256=candidate_sha)
+                    skipped += 1
+                    continue
+                bump_provider(metrics, candidate.provider, candidate.expected_label, download_attempted=1)
+                tracker.record_candidate_outcome(candidate_key, status="download_attempted", increment_attempts=True)
+                content = download_pe_candidate(candidate)
+                if len(content) < 2 or content[:2] != b"MZ":
+                    logger.warning(
+                        "[%s] Skipping non-PE download: %s",
+                        PHASE_FETCH,
+                        candidate.external_id,
+                    )
+                    intel.record_download_outcome(candidate.metadata, success=False)
+                    bump_provider(metrics, candidate.provider, candidate.expected_label, non_pe=1, failed=1)
+                    tracker.record_candidate_outcome(candidate_key, status="non_pe")
+                    non_pe += 1
+                    ext = candidate.external_id
+                    if len(ext) == 64:
+                        mark_corrupted(
+                            tracker,
+                            ext,
+                            "Downloaded content failed MZ signature check",
+                            acquired_at=candidate.metadata.get("first_seen"),
+                            label=candidate.expected_label,
+                            source_first_seen=(
+                                candidate.metadata.get("source_first_seen")
+                                or candidate.metadata.get("first_seen")
+                            ),
+                        )
+                        corrupted += 1
+                    continue
+                sha = hashlib.sha256(content).hexdigest()
+                if tracker.is_corrupted(sha):
+                    vlog(logger, "info", "Skipping previously corrupted content hash: %s", sha)
+                    bump_provider(metrics, candidate.provider, candidate.expected_label, failed=1)
+                    tracker.record_candidate_outcome(candidate_key, status="corrupted", sha256=sha)
+                    skipped += 1
+                    continue
+                if tracker.is_downloaded(sha):
                     tracker.record_sample_source(
-                        candidate_sha,
+                        sha,
                         source_provider=candidate.provider,
                         source_url=str(source_url),
                     )
-                logger.info("Already downloaded, skipping before fetch: %s", candidate_sha)
-                bump_provider(metrics, candidate.provider, candidate.expected_label, duplicate=1)
-                tracker.record_candidate_outcome(candidate_key, status="duplicate", sha256=candidate_sha)
-                skipped += 1
-                continue
-            bump_provider(metrics, candidate.provider, candidate.expected_label, download_attempted=1)
-            tracker.record_candidate_outcome(candidate_key, status="download_attempted", increment_attempts=True)
-            content = download_pe_candidate(candidate)
-            if len(content) < 2 or content[:2] != b"MZ":
-                logger.warning("Skipping non-PE download: %s", candidate.external_id)
-                intel.record_download_outcome(candidate.metadata, success=False)
-                bump_provider(metrics, candidate.provider, candidate.expected_label, non_pe=1, failed=1)
-                tracker.record_candidate_outcome(candidate_key, status="non_pe")
-                non_pe += 1
-                ext = candidate.external_id
-                if len(ext) == 64:
-                    mark_corrupted(
-                        tracker,
-                        ext,
-                        "Downloaded content failed MZ signature check",
-                        acquired_at=candidate.metadata.get("first_seen"),
-                        label=candidate.expected_label,
-                        source_first_seen=(
-                            candidate.metadata.get("source_first_seen")
-                            or candidate.metadata.get("first_seen")
-                        ),
-                    )
-                    corrupted += 1
-                continue
-            sha = hashlib.sha256(content).hexdigest()
-            if tracker.is_corrupted(sha):
-                logger.info("Skipping previously corrupted content hash: %s", sha)
-                bump_provider(metrics, candidate.provider, candidate.expected_label, failed=1)
-                tracker.record_candidate_outcome(candidate_key, status="corrupted", sha256=sha)
-                skipped += 1
-                continue
-            if tracker.is_downloaded(sha):
-                tracker.record_sample_source(
-                    sha,
-                    source_provider=candidate.provider,
-                    source_url=str(source_url),
+                    vlog(logger, "info", "Already downloaded, skipping: %s", sha)
+                    bump_provider(metrics, candidate.provider, candidate.expected_label, duplicate=1)
+                    tracker.record_candidate_outcome(candidate_key, status="duplicate", sha256=sha)
+                    skipped += 1
+                    continue
+                path = save_pe_to_sandbox(sha, content)
+                paths.append(path)
+                hashes.append(sha)
+                meta = dict(candidate.metadata)
+                meta.setdefault("file_name", candidate.metadata.get("file_name", ""))
+                meta["first_seen"] = meta.get("first_seen") or db.MalwareTracker.utc_now_iso()
+                meta["expected_label"] = candidate.expected_label
+                meta["source_provider"] = candidate.provider
+                if source_url:
+                    meta["source_url"] = source_url
+                meta["source_first_seen"] = meta.get("source_first_seen") or meta.get("first_seen") or ""
+                meta["ingested_at"] = db.MalwareTracker.utc_now_iso()
+                meta["candidate_key"] = candidate_key
+                metadata[sha] = meta
+                intel.record_download_outcome(meta, success=True)
+                bump_provider(metrics, candidate.provider, candidate.expected_label, downloaded=1)
+                tracker.record_candidate_outcome(candidate_key, status="downloaded", sha256=sha)
+            except Exception as exc:
+                logger.warning(
+                    "[%s] Download failed for %s: %s",
+                    PHASE_FETCH,
+                    candidate.external_id,
+                    exc,
                 )
-                logger.info("Already downloaded, skipping: %s", sha)
-                bump_provider(metrics, candidate.provider, candidate.expected_label, duplicate=1)
-                tracker.record_candidate_outcome(candidate_key, status="duplicate", sha256=sha)
-                skipped += 1
-                continue
-            path = save_pe_to_sandbox(sha, content)
-            paths.append(path)
-            hashes.append(sha)
-            meta = dict(candidate.metadata)
-            meta.setdefault("file_name", candidate.metadata.get("file_name", ""))
-            meta["first_seen"] = meta.get("first_seen") or db.MalwareTracker.utc_now_iso()
-            meta["expected_label"] = candidate.expected_label
-            meta["source_provider"] = candidate.provider
-            if source_url:
-                meta["source_url"] = source_url
-            meta["source_first_seen"] = meta.get("source_first_seen") or meta.get("first_seen") or ""
-            meta["ingested_at"] = db.MalwareTracker.utc_now_iso()
-            meta["candidate_key"] = candidate_key
-            metadata[sha] = meta
-            intel.record_download_outcome(meta, success=True)
-            bump_provider(metrics, candidate.provider, candidate.expected_label, downloaded=1)
-            tracker.record_candidate_outcome(candidate_key, status="downloaded", sha256=sha)
-        except Exception as exc:
-            logger.warning("Download failed for %s: %s", candidate.external_id, exc)
-            intel.record_download_outcome(candidate.metadata, success=False)
-            bump_provider(metrics, candidate.provider, candidate.expected_label, failed=1)
-            if candidate_key:
-                tracker.record_candidate_outcome(candidate_key, status="failed", error=str(exc))
-            failed += 1
+                intel.record_download_outcome(candidate.metadata, success=False)
+                bump_provider(metrics, candidate.provider, candidate.expected_label, failed=1)
+                if candidate_key:
+                    tracker.record_candidate_outcome(candidate_key, status="failed", error=str(exc))
+                failed += 1
 
-    logger.info("Fetched %d/%d binaries", len(paths), len(state.sample_candidates))
+    phase_log(
+        logger,
+        PHASE_FETCH,
+        "Done: %d new, %d skipped, %d failed, %d non-PE (%d/%d candidates)",
+        len(paths),
+        skipped,
+        failed,
+        non_pe,
+        len(paths),
+        n_candidates,
+    )
     metrics.update(
         {
-            "download_attempted": len(state.sample_candidates),
+            "download_attempted": n_candidates,
             "downloaded_count": len(paths),
             "download_failed": failed,
             "download_non_pe": non_pe,

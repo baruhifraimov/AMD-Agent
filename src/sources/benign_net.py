@@ -2,14 +2,15 @@
 
 from __future__ import annotations
 
-import logging
 import subprocess
 from pathlib import Path
 
 from src.config import BENIGN_NET_MAX_DISCOVER, BENIGN_NET_REPO_URL, REPOS_DIR, ensure_dirs
 from src.sources.base import PESourceProvider, SampleCandidate
 
-logger = logging.getLogger(__name__)
+from src.log import PHASE_DISCOVERY, get_logger, phase_log, vlog
+
+logger = get_logger(__name__)
 
 _REPO_NAME = "benign-net"
 
@@ -26,7 +27,7 @@ class BenignNetProvider(PESourceProvider):
     def _ensure_repo(self) -> Path:
         dest = self._repo_dir()
         if not (dest / ".git").exists():
-            logger.info("Cloning Benign-NET into %s", dest)
+            phase_log(logger, PHASE_DISCOVERY, "Cloning Benign-NET into %s", dest)
             subprocess.check_call(
                 ["git", "clone", "--depth", "1", BENIGN_NET_REPO_URL, str(dest)],
                 timeout=600,
@@ -38,7 +39,7 @@ class BenignNetProvider(PESourceProvider):
                     timeout=300,
                 )
             except subprocess.CalledProcessError as exc:
-                logger.warning("Benign-NET git pull failed: %s", exc)
+                logger.warning("[%s] Benign-NET git pull failed: %s", PHASE_DISCOVERY, exc)
         return dest
 
     def discover(self, limit: int) -> list[SampleCandidate]:
@@ -46,7 +47,7 @@ class BenignNetProvider(PESourceProvider):
         try:
             root = self._ensure_repo()
         except (subprocess.CalledProcessError, OSError, subprocess.TimeoutExpired) as exc:
-            logger.warning("Benign-NET repo unavailable: %s", exc)
+            logger.warning("[%s] Benign-NET repo unavailable: %s", PHASE_DISCOVERY, exc)
             return []
 
         candidates: list[SampleCandidate] = []

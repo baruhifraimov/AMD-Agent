@@ -3,16 +3,16 @@
 from __future__ import annotations
 
 import json
-import logging
 from typing import Any
 
 from src.collection.context import build_collection_context
 from src.config import EVAL_EVERY_RUNS, EVAL_SKIP_BOOTSTRAP, EVAL_STATE_PATH, ensure_dirs
 from src.evaluation.drift_log import append_drift_log, build_drift_record
+from src.log import PHASE_EVAL, get_logger, phase_log, task_status, vlog
 from src.ml.classifier import load_bundle, model_bundle_ready
 from src.state import AgentState
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 def _should_warn_empty_eval(state: AgentState) -> bool:
@@ -30,7 +30,7 @@ def _load_eval_state() -> dict[str, Any]:
     try:
         data = json.loads(EVAL_STATE_PATH.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
-        logger.warning("Evaluation state unreadable; resetting: %s", EVAL_STATE_PATH)
+        logger.warning("[%s] Evaluation state unreadable; resetting: %s", PHASE_EVAL, EVAL_STATE_PATH)
         return {"runs": 0}
     if not isinstance(data, dict):
         return {"runs": 0}
@@ -78,12 +78,16 @@ def evaluation_node(state: AgentState) -> dict:
     should_run, run_count, phase, reason = _should_run_eval(state)
     if not should_run:
         if run_count is None:
-            logger.info("Evaluation skipped: phase=%s reason=%s", phase, reason)
+            phase_log(logger, PHASE_EVAL, "Skipped (%s, phase=%s)", reason, phase)
         else:
-            logger.info(
-                "Evaluation skipped: run=%d interval=%d phase=%s",
+            remainder = run_count % EVAL_EVERY_RUNS
+            runs_until = EVAL_EVERY_RUNS - remainder if remainder else EVAL_EVERY_RUNS
+            phase_log(
+                logger,
+                PHASE_EVAL,
+                "Skipped (next TESSERACT in %d run(s), counter=%d, phase=%s)",
+                runs_until,
                 run_count,
-                EVAL_EVERY_RUNS,
                 phase,
             )
         return {"evaluation_metrics": state.evaluation_metrics}
@@ -93,24 +97,27 @@ def evaluation_node(state: AgentState) -> dict:
     try:
         from src.evaluation.tesseract import append_eval_log, plot_performance_decay, run_tesseract_eval, run_retrograde_eval
 
-        logger.info("Running post-operation evaluation (reason=%s)", reason)
-        metrics = run_tesseract_eval()
-        retro_metrics = run_retrograde_eval()
-        
+        phase_log(logger, PHASE_EVAL, "Running TESSERACT (%s, phase=%s)", reason, phase)
+        with task_status(PHASE_EVAL, f"TESSERACT evaluation ({reason})"):
+            metrics = run_tesseract_eval()
+            retro_metrics = run_retrograde_eval()
+
         metrics.update(retro_metrics)
         merged = {**state.evaluation_metrics, **metrics}
 
         if metrics:
             append_eval_log(metrics)
             plot_performance_decay()
-            logger.info("TESSERACT eval: %s", metrics)
+            phase_log(logger, PHASE_EVAL, "TESSERACT metrics recorded")
+            vlog(logger, "info", "TESSERACT eval detail: %s", metrics)
         elif _should_warn_empty_eval(state):
             logger.warning(
-                "TESSERACT eval returned no metrics (steady phase, model ready); "
-                "check labeled sample count and class balance"
+                "[%s] TESSERACT returned no metrics (steady phase, model ready); "
+                "check labeled sample count and class balance",
+                PHASE_EVAL,
             )
     except Exception as exc:
-        logger.warning("Evaluation failed; continuing without TESSERACT metrics: %s", exc)
+        logger.warning("[%s] Evaluation failed; continuing: %s", PHASE_EVAL, exc)
         merged["evaluation_error"] = 1.0
 
     out: dict = {"evaluation_metrics": merged}
@@ -120,10 +127,10 @@ def evaluation_node(state: AgentState) -> dict:
             log_state = state.model_copy(update={"evaluation_metrics": merged})
             record = build_drift_record(log_state, post_metrics=metrics)
             append_drift_log(record)
-            logger.info("Drift event logged to drift_log.jsonl")
+            phase_log(logger, PHASE_EVAL, "Drift event logged to drift_log.jsonl")
             out["pending_drift_log"] = False
         except Exception as exc:
-            logger.warning("Drift event logging failed; continuing: %s", exc)
+            logger.warning("[%s] Drift event logging failed; continuing: %s", PHASE_EVAL, exc)
             out["pending_drift_log"] = True
 
     return out
