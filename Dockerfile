@@ -38,8 +38,9 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     ca-certificates \
     git
 
-RUN git clone --depth 1 https://github.com/mandiant/capa-rules.git /opt/capa-rules \
-    && rm -rf /opt/capa-rules/.git
+RUN git clone --depth 1 --branch v9.4.0 https://github.com/mandiant/capa-rules.git /opt/capa-rules \
+    && rm -rf /opt/capa-rules/.git \
+    && mkdir -p /opt/capa-sigs
 
 FROM python:3.12-slim
 
@@ -67,6 +68,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     libgomp1
 
 COPY --from=capa-rules /opt/capa-rules /opt/capa-rules
+COPY --from=capa-rules /opt/capa-sigs /opt/capa-sigs
 COPY src/ ./src/
 COPY scripts/ ./scripts/
 COPY docker/ ./docker/

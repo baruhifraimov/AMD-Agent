@@ -30,7 +30,7 @@ def explain_drift_context(state: AgentState) -> dict:
 
 
 def _run_capa(path: str) -> dict:
-    command = ["capa", "-j", "-r", str(CAPA_RULES_DIR), path]
+    command = ["capa", "-j", "-r", str(CAPA_RULES_DIR), "-s", "/opt/capa-sigs", path]
     try:
         completed = subprocess.run(
             command,
