@@ -67,9 +67,28 @@ class OTXPulseCTIProvider(PESourceProvider):
         logger.info("OTX collected %d unique hashes (cap %d) from %d pulse(s)",
                      len(evidence), max_hashes, len(pulses))
 
-        filtered = semantic_filter_hashes(evidence)
-
+        # MB PE check first — cheap cached API call eliminates non-PE hashes
+        # before spending Ollama cycles on them.
         tracker = db.get_tracker()
+        pe_evidence: list[dict[str, Any]] = []
+        for item in evidence:
+            sha = str(item.get("sha256", "")).lower()
+            if tracker.is_downloaded(sha) or tracker.is_corrupted(sha) or tracker.is_pending(sha):
+                continue
+            try:
+                if mb.is_pe_hash(sha):
+                    pe_evidence.append(item)
+            except mb.MalwareBazaarUnavailable:
+                logger.warning("MB circuit open; aborting OTX PE pre-check")
+                break
+        logger.info("OTX MB pre-filter: %d/%d hashes confirmed PE",
+                     len(pe_evidence), len(evidence))
+
+        if not pe_evidence:
+            return []
+
+        filtered = semantic_filter_hashes(pe_evidence)
+
         candidates: list[SampleCandidate] = []
         seen: set[str] = set()
         for item in filtered:
@@ -78,14 +97,6 @@ class OTXPulseCTIProvider(PESourceProvider):
             sha = str(item.get("sha256", "")).lower()
             if len(sha) != 64 or sha in seen:
                 continue
-            if tracker.is_downloaded(sha) or tracker.is_corrupted(sha) or tracker.is_pending(sha):
-                continue
-            try:
-                if not mb.is_pe_hash(sha):
-                    continue
-            except mb.MalwareBazaarUnavailable:
-                logger.warning("MB circuit open; aborting OTX PE checks")
-                break
             seen.add(sha)
             candidates.append(
                 SampleCandidate(

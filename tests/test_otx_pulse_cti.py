@@ -53,10 +53,11 @@ def test_otx_returns_empty_when_no_pulses(tmp_paths):
     assert candidates == []
 
 
+@patch("src.sources.otx_pulse_cti.mb.is_pe_hash", return_value=True)
 @patch("src.sources.otx_pulse_cti.semantic_filter_hashes", return_value=[])
 @patch("src.sources.otx_pulse_cti.OTX_API_KEY", "test-key")
 @patch("src.sources.otx_pulse_cti.OTX_ENABLED", True)
-def test_otx_returns_empty_when_semantic_filter_rejects_all(mock_filter, tmp_paths):
+def test_otx_returns_empty_when_semantic_filter_rejects_all(mock_filter, mock_is_pe, tmp_paths):
     sha = "c" * 64
     pulse = {
         "pulse_id": "p2",
