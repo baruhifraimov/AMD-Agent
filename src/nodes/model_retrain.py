@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 
 import src.db.tracker as db
 from src.config import allow_local_benign
+from src.evaluation.training_history import count_retrains
 from src.log import PHASE_RETRAIN, get_logger, phase_log, task_status
 from src.ml.classifier import ingest_benign_corpus
 from src.ml.madar import madar_retrain
@@ -34,6 +35,7 @@ def _make_model_version() -> str:
 def model_retrain(state: AgentState) -> dict:
     trigger = "drift_detected" if state.drift_detected else "threshold_retrain"
     model_version = _make_model_version()
+    retrain_count = count_retrains() + 1
 
     tracker = db.get_tracker()
     if allow_local_benign():
@@ -122,11 +124,14 @@ def model_retrain(state: AgentState) -> dict:
         "drift_detected": False,
         "threshold_retrain": False,
         "new_labeled_batch": [],
+        "retrain_count": retrain_count,
         "evaluation_metrics": {
             **state.evaluation_metrics,
             "retrained": 1.0,
             "retrain_trigger": trigger,
             "model_version": model_version,
+            "task_id": float(task_id),
+            "retrain_count": float(retrain_count),
             "replay_size": float(len(historical_features)),
             "new_batch_size": float(len(new_features)),
             "feature_reselection": 1.0 if feature_reselection else 0.0,

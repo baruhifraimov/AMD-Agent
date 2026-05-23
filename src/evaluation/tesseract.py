@@ -188,6 +188,7 @@ def append_eval_log(metrics: dict[str, float], path: Path | None = None) -> None
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "trigger": metrics.get("retrain_trigger", "periodic"),
         "model_version": metrics.get("model_version", ""),
+        "retrain_count": int(metrics.get("retrain_count", 0) or 0),
         "metrics": metrics,
     }
     with p.open("a") as f:
