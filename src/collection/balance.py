@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-import os
-
 import src.db.tracker as db
 from src.config import (
     BENIGN_PROVIDER_NAMES,
+    FORCED_BENIGN_PROVIDER,
     MIN_TRAIN_BENIGN,
     MIN_TRAIN_MALWARE,
     TARGET_MALWARE_BENIGN_RATIO,
@@ -46,7 +45,7 @@ def choose_benign_sources(
     registry: SourceRegistry,
     tracker: db.MalwareTracker | None = None,
 ) -> list[str]:
-    forced = os.getenv("AMD_BENIGN_PROVIDER", "").strip().lower()
+    forced = (FORCED_BENIGN_PROVIDER or "").strip().lower()
     if forced:
         return [registry.get(forced).name]
 

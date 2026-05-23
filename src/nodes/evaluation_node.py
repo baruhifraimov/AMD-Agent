@@ -91,10 +91,13 @@ def evaluation_node(state: AgentState) -> dict:
     metrics: dict[str, float] = {}
     merged: dict[str, float] = dict(state.evaluation_metrics)
     try:
-        from src.evaluation.tesseract import append_eval_log, plot_performance_decay, run_tesseract_eval
+        from src.evaluation.tesseract import append_eval_log, plot_performance_decay, run_tesseract_eval, run_retrograde_eval
 
         logger.info("Running post-operation evaluation (reason=%s)", reason)
         metrics = run_tesseract_eval()
+        retro_metrics = run_retrograde_eval()
+        
+        metrics.update(retro_metrics)
         merged = {**state.evaluation_metrics, **metrics}
 
         if metrics:

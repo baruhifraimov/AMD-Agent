@@ -6,13 +6,13 @@ from src.sources.malshare import MalShareProvider
 
 
 def test_discover_disabled_returns_empty(monkeypatch):
-    monkeypatch.setenv("AMD_MALSHARE_ENABLED", "0")
+    monkeypatch.setattr("src.config.MALSHARE_ENABLED", False)
     provider = MalShareProvider()
     assert provider.discover(5) == []
 
 
 def test_discover_returns_candidates(monkeypatch):
-    monkeypatch.setenv("AMD_MALSHARE_ENABLED", "1")
+    monkeypatch.setattr("src.config.MALSHARE_ENABLED", True)
     monkeypatch.setenv("MALSHARE_API_KEY", "k")
     mock_client = MagicMock()
     mock_client.list_pe32_hashes.return_value = [{"hash": "a" * 32}]

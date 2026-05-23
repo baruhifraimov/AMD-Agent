@@ -29,13 +29,30 @@ CREATE TABLE IF NOT EXISTS samples (
     feature_version TEXT,
     feature_dim INTEGER,
     ingested_at TEXT,
-    source_first_seen TEXT
+    source_first_seen TEXT,
+    malware_family TEXT,
+    task_id INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_samples_acquired ON samples(acquired_at);
 CREATE INDEX IF NOT EXISTS idx_samples_ingested ON samples(ingested_at);
 CREATE INDEX IF NOT EXISTS idx_samples_status ON samples(status);
 CREATE INDEX IF NOT EXISTS idx_samples_source_url ON samples(source_url);
 CREATE INDEX IF NOT EXISTS idx_samples_feature_version ON samples(feature_version);
+CREATE INDEX IF NOT EXISTS idx_samples_family ON samples(malware_family);
+CREATE INDEX IF NOT EXISTS idx_samples_task_id ON samples(task_id);
+CREATE TABLE IF NOT EXISTS task_log (
+    task_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at TEXT NOT NULL,
+    sample_count INTEGER NOT NULL DEFAULT 0,
+    trigger TEXT,
+    replay_budget_used INTEGER,
+    model_version TEXT
+);
+CREATE TABLE IF NOT EXISTS family_counts (
+    malware_family TEXT PRIMARY KEY,
+    sample_count INTEGER NOT NULL DEFAULT 0,
+    last_seen_at TEXT
+);
 CREATE TABLE IF NOT EXISTS mb_hash_cache (
     sha256 TEXT PRIMARY KEY,
     is_pe INTEGER NOT NULL,
@@ -146,6 +163,10 @@ class MalwareTracker:
             conn.execute("ALTER TABLE samples ADD COLUMN ingested_at TEXT")
         if "source_first_seen" not in columns:
             conn.execute("ALTER TABLE samples ADD COLUMN source_first_seen TEXT")
+        if "malware_family" not in columns:
+            conn.execute("ALTER TABLE samples ADD COLUMN malware_family TEXT")
+        if "task_id" not in columns:
+            conn.execute("ALTER TABLE samples ADD COLUMN task_id INTEGER")
         conn.execute(
             """
             UPDATE samples
@@ -160,6 +181,8 @@ class MalwareTracker:
         conn.execute("CREATE INDEX IF NOT EXISTS idx_samples_source_url ON samples(source_url)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_samples_feature_version ON samples(feature_version)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_samples_ingested ON samples(ingested_at)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_samples_family ON samples(malware_family)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_samples_task_id ON samples(task_id)")
         conn.execute(
             """
             UPDATE samples
@@ -229,6 +252,19 @@ class MalwareTracker:
                 name TEXT PRIMARY KEY,
                 value INTEGER NOT NULL DEFAULT 0,
                 updated_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS task_log (
+                task_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                created_at TEXT NOT NULL,
+                sample_count INTEGER NOT NULL DEFAULT 0,
+                trigger TEXT,
+                replay_budget_used INTEGER,
+                model_version TEXT
+            );
+            CREATE TABLE IF NOT EXISTS family_counts (
+                malware_family TEXT PRIMARY KEY,
+                sample_count INTEGER NOT NULL DEFAULT 0,
+                last_seen_at TEXT
             );
             """
         )
@@ -593,6 +629,97 @@ class MalwareTracker:
                   AND COALESCE(status, 'active') = 'active'
                 ORDER BY COALESCE(NULLIF(ingested_at, ''), acquired_at) ASC
                 """
+            ).fetchall()
+        return [self._row_to_dict(r) for r in rows]
+
+    def update_family(self, sha256: str, family: str) -> None:
+        """Update malware family and family counts."""
+        sha = sha256.lower()
+        fam = (family or "unknown").strip().lower()
+        now = self.utc_now_iso()
+        with self._connect() as conn:
+            conn.execute(
+                "UPDATE samples SET malware_family = ? WHERE sha256 = ?",
+                (fam, sha),
+            )
+            conn.execute(
+                """
+                INSERT INTO family_counts (malware_family, sample_count, last_seen_at)
+                VALUES (?, 1, ?)
+                ON CONFLICT(malware_family) DO UPDATE SET
+                    sample_count = sample_count + 1,
+                    last_seen_at = excluded.last_seen_at
+                """,
+                (fam, now),
+            )
+
+    def fetch_labeled_with_features_and_family(self) -> list[dict[str, Any]]:
+        return self.fetch_labeled_with_features()
+
+    def get_family_counts(self) -> dict[str, int]:
+        """Return counts of active samples per family."""
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT malware_family, COUNT(*) as cnt FROM samples
+                WHERE label = 1
+                  AND features_json IS NOT NULL
+                  AND file_path IS NOT NULL
+                  AND file_path != ''
+                  AND COALESCE(status, 'active') = 'active'
+                  AND malware_family IS NOT NULL
+                GROUP BY malware_family
+                """
+            ).fetchall()
+        return {str(r["malware_family"]): int(r["cnt"]) for r in rows}
+
+    def get_current_task_id(self) -> int:
+        """Return the highest task_id, or 0 if none exist."""
+        with self._connect() as conn:
+            row = conn.execute("SELECT MAX(task_id) as max_id FROM task_log").fetchone()
+        return int(row["max_id"]) if row and row["max_id"] is not None else 0
+
+    def create_task(self, trigger: str, sample_count: int) -> int:
+        """Create a new chronological task and return its ID."""
+        now = self.utc_now_iso()
+        with self._connect() as conn:
+            cursor = conn.execute(
+                """
+                INSERT INTO task_log (created_at, sample_count, trigger)
+                VALUES (?, ?, ?)
+                """,
+                (now, sample_count, trigger),
+            )
+            return cursor.lastrowid or 0
+
+    def update_sample_task(self, sha256: str, task_id: int) -> None:
+        """Assign a sample to a task ID."""
+        with self._connect() as conn:
+            conn.execute(
+                "UPDATE samples SET task_id = ? WHERE sha256 = ?",
+                (task_id, sha256.lower()),
+            )
+
+    def get_all_task_ids(self) -> list[int]:
+        """Return list of all task IDs ordered by creation time."""
+        with self._connect() as conn:
+            rows = conn.execute("SELECT task_id FROM task_log ORDER BY task_id ASC").fetchall()
+        return [int(r["task_id"]) for r in rows]
+
+    def fetch_task_holdout(self, task_id: int) -> list[dict[str, Any]]:
+        """Fetch valid labeled features belonging to a specific task."""
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT * FROM samples
+                WHERE task_id = ?
+                  AND features_json IS NOT NULL
+                  AND label IS NOT NULL
+                  AND file_path IS NOT NULL
+                  AND file_path != ''
+                  AND COALESCE(status, 'active') = 'active'
+                """,
+                (task_id,),
             ).fetchall()
         return [self._row_to_dict(r) for r in rows]
 

@@ -17,3 +17,5 @@ graphify-out/
 .agent/
 .cursor/
 AGENTS.md
+
+data/

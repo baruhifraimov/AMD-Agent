@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from src.tools.clients.malshare_api_client import MalShareClient, MalShareUnavailable, malshare_enabled
+from src.config import malshare_enabled
+from src.tools.clients.malshare_api_client import MalShareClient, MalShareUnavailable
 
 _client: MalShareClient | None = None
 

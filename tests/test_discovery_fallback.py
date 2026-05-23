@@ -124,7 +124,7 @@ def _tracker():
 
 def test_active_malware_sources_split_between_malwarebazaar_and_malshare(monkeypatch):
     monkeypatch.setenv("MALWAREBAZAAR_AUTH_KEY", "test-key")
-    monkeypatch.setenv("AMD_MALSHARE_ENABLED", "1")
+    monkeypatch.setattr("src.config.MALSHARE_ENABLED", True)
     registry, mb, ms = _active_registry(
         mb_discover=lambda _limit: [
             _candidate("a", "malwarebazaar"),
@@ -163,7 +163,7 @@ def test_active_malware_sources_split_between_malwarebazaar_and_malshare(monkeyp
 @patch("src.collection.discovery_chain.discover_with_fallback")
 def test_active_malware_sources_disabled_uses_existing_chain(mock_discover, monkeypatch):
     monkeypatch.setenv("MALWAREBAZAAR_AUTH_KEY", "test-key")
-    monkeypatch.setenv("AMD_MALSHARE_ENABLED", "0")
+    monkeypatch.setattr("src.config.MALSHARE_ENABLED", False)
     mock_discover.return_value = [_candidate("a", "malwarebazaar")]
     registry, _mb, _ms = _active_registry(lambda _limit: [], lambda _limit: [])
     ctx = CollectionContext(benign_count=0, malware_count=0, model_ready=False, pending_depth=0)
@@ -183,7 +183,7 @@ def test_active_malware_sources_disabled_uses_existing_chain(mock_discover, monk
 
 def test_active_malware_sources_deduplicates_malshare_overlap(monkeypatch):
     monkeypatch.setenv("MALWAREBAZAAR_AUTH_KEY", "test-key")
-    monkeypatch.setenv("AMD_MALSHARE_ENABLED", "1")
+    monkeypatch.setattr("src.config.MALSHARE_ENABLED", True)
     same = SampleCandidate("a" * 64, "malwarebazaar", 1, {"sha256": "a" * 64})
     overlap = SampleCandidate("a" * 64, "malshare", 1, {"sha256": "a" * 64})
     registry, _mb, _ms = _active_registry(
