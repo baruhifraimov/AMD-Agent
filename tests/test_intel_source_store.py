@@ -59,11 +59,3 @@ def test_disable_source(tmp_paths):
     source = store.get_source(sid)
     assert source is not None
     assert int(source["enabled"]) == 0
-
-
-def test_threatingestor_virtual_source_is_not_due_feed(tmp_paths):
-    store = IntelSourceStore(tmp_paths["tracker"].db_path)
-    sid = store.ensure_threatingestor_source()
-    assert sid > 0
-    due = store.list_due_sources(limit=5)
-    assert all(source["source_type"] != "threatingestor" for source in due)

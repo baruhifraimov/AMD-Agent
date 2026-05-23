@@ -55,11 +55,8 @@ PE_SOURCE_DISCOVERY_ENV = "AMD_PE_SOURCE_DISCOVERY"
 PE_DISCOVERY_MAX_URLS_ENV = "AMD_PE_DISCOVERY_MAX_URLS_PER_RUN"
 MIN_PE_SOURCES_ENV = "MIN_PE_SOURCES"
 ALLOW_LOCAL_BENIGN_ENV = "AMD_ALLOW_LOCAL_BENIGN"
-THREAT_QUEUE_ENABLED_ENV = "AMD_THREAT_QUEUE_ENABLED"
-INTEL_INGEST_ENABLED_ENV = "AMD_INTEL_INGEST_ENABLED"
 INTEL_MIN_POLL_INTERVAL_ENV = "AMD_INTEL_MIN_POLL_INTERVAL"
 INTEL_MAX_POLL_INTERVAL_ENV = "AMD_INTEL_MAX_POLL_INTERVAL"
-INTEL_PENDING_CAP_MULT_ENV = "AMD_INTEL_PENDING_CAP_MULT"
 CTI_SEED_SOURCES_ENABLED_ENV = "AMD_CTI_SEED_SOURCES_ENABLED"
 CTI_DOWNLOAD_ALLOWLIST_ENV = "AMD_CTI_DOWNLOAD_ALLOWLIST"
 CTI_SEARCH_BACKENDS_ENV = "AMD_CTI_SEARCH_BACKENDS"
@@ -73,14 +70,6 @@ OLLAMA_MODEL_ENV = "AMD_OLLAMA_MODEL"
 OLLAMA_TIMEOUT_ENV = "AMD_OLLAMA_TIMEOUT"
 CAPA_RULES_DIR_ENV = "AMD_CAPA_RULES_DIR"
 REPORT_LANGUAGE_ENV = "AMD_REPORT_LANGUAGE"
-THREATINGESTOR_ENABLED_ENV = "AMD_THREATINGESTOR_ENABLED"
-THREATINGESTOR_CONFIG_ENV = "AMD_THREATINGESTOR_CONFIG"
-THREATINGESTOR_ARTIFACT_DB_ENV = "AMD_THREATINGESTOR_ARTIFACT_DB"
-THREATINGESTOR_BRIDGE_INTERVAL_ENV = "AMD_THREATINGESTOR_BRIDGE_INTERVAL"
-THREATINGESTOR_BRIDGE_BATCH_ENV = "AMD_THREATINGESTOR_BRIDGE_BATCH"
-THREATINGESTOR_SLEEP_BOOTSTRAP_ENV = "AMD_THREATINGESTOR_SLEEP_BOOTSTRAP"
-THREATINGESTOR_SLEEP_STEADY_ENV = "AMD_THREATINGESTOR_SLEEP_STEADY"
-THREATINGESTOR_VERBOSE_ENV = "AMD_THREATINGESTOR_VERBOSE"
 ADWIN_DELTA_ENV = "AMD_ADWIN_DELTA"
 FEATURE_SELECTION_K_ENV = "AMD_FEATURE_SELECTION_K"
 OPTUNA_TRIALS_ENV = "AMD_OPTUNA_TRIALS"
@@ -102,14 +91,11 @@ MB_MAX_INFO_CALLS_PER_RUN_ENV = "AMD_MB_MAX_INFO_CALLS_PER_RUN"
 CTI_HOST_BLOCK_SECONDS_403_ENV = "AMD_CTI_HOST_BLOCK_SECONDS_403"
 CTI_HOST_BLOCK_SECONDS_429_ENV = "AMD_CTI_HOST_BLOCK_SECONDS_429"
 CTI_HOST_BLOCK_SECONDS_TRANSPORT_ENV = "AMD_CTI_HOST_BLOCK_SECONDS_TRANSPORT"
-
-
-def threat_queue_enabled() -> bool:
-    return os.getenv(THREAT_QUEUE_ENABLED_ENV, "1").strip() not in ("0", "false", "no")
-
-
-def intel_ingest_enabled() -> bool:
-    return os.getenv(INTEL_INGEST_ENABLED_ENV, "1").strip() not in ("0", "false", "no")
+PROVIDER_COOLDOWN_ZERO_RUNS_ENV = "AMD_PROVIDER_COOLDOWN_ZERO_RUNS"
+PROVIDER_COOLDOWN_SECONDS_ENV = "AMD_PROVIDER_COOLDOWN_SECONDS"
+PROVIDER_COOLDOWN_MIN_ATTEMPTS_ENV = "AMD_PROVIDER_COOLDOWN_MIN_ATTEMPTS"
+STEADY_BENIGN_EVERY_N_ENV = "AMD_STEADY_BENIGN_EVERY_N"
+TESSERACT_MIXED_UNTIL_HEALTHY_ENV = "AMD_TESSERACT_MIXED_UNTIL_HEALTHY"
 
 
 def cti_seed_sources_enabled() -> bool:
@@ -120,21 +106,22 @@ def ollama_source_selection_enabled() -> bool:
     return os.getenv(OLLAMA_SOURCE_SELECTION_ENV, "1").strip() not in ("0", "false", "no")
 
 
-def threatingestor_enabled() -> bool:
-    return os.getenv(THREATINGESTOR_ENABLED_ENV, "1").strip() not in ("0", "false", "no")
-
-
 def eval_skip_bootstrap() -> bool:
     return os.getenv(EVAL_SKIP_BOOTSTRAP_ENV, "1").strip() not in ("0", "false", "no")
 
 
-THREAT_QUEUE_ENABLED = threat_queue_enabled()
-THREATINGESTOR_ENABLED = threatingestor_enabled()
-INTEL_INGEST_ENABLED = intel_ingest_enabled()
+def tesseract_mixed_until_healthy() -> bool:
+    return os.getenv(TESSERACT_MIXED_UNTIL_HEALTHY_ENV, "1").strip() not in ("0", "false", "no")
+
+
 CTI_SEED_SOURCES_ENABLED = cti_seed_sources_enabled()
 INTEL_MIN_POLL_INTERVAL = int(os.getenv(INTEL_MIN_POLL_INTERVAL_ENV, "60"))
 INTEL_MAX_POLL_INTERVAL = int(os.getenv(INTEL_MAX_POLL_INTERVAL_ENV, "3600"))
-INTEL_PENDING_CAP_MULT = int(os.getenv(INTEL_PENDING_CAP_MULT_ENV, "3"))
+PROVIDER_COOLDOWN_ZERO_RUNS = max(1, int(os.getenv(PROVIDER_COOLDOWN_ZERO_RUNS_ENV, "3")))
+PROVIDER_COOLDOWN_SECONDS = max(60, int(os.getenv(PROVIDER_COOLDOWN_SECONDS_ENV, "43200")))
+PROVIDER_COOLDOWN_MIN_ATTEMPTS = max(1, int(os.getenv(PROVIDER_COOLDOWN_MIN_ATTEMPTS_ENV, "5")))
+STEADY_BENIGN_EVERY_N = max(1, int(os.getenv(STEADY_BENIGN_EVERY_N_ENV, "4")))
+TESSERACT_MIXED_UNTIL_HEALTHY = tesseract_mixed_until_healthy()
 
 # Local LLM / explainability
 OLLAMA_BASE_URL = os.getenv(OLLAMA_BASE_URL_ENV, "http://localhost:11434").strip()
@@ -142,26 +129,6 @@ OLLAMA_MODEL = os.getenv(OLLAMA_MODEL_ENV, "llama3.1:8b").strip()
 OLLAMA_TIMEOUT = float(os.getenv(OLLAMA_TIMEOUT_ENV, "8"))
 CAPA_RULES_DIR = Path(os.getenv(CAPA_RULES_DIR_ENV, "/opt/capa-rules")).expanduser()
 REPORT_LANGUAGE = os.getenv(REPORT_LANGUAGE_ENV, "English").strip() or "English"
-_default_threatingestor_artifact_db = (
-    Path("/data/threatingestor_artifacts.db")
-    if _in_container
-    else PROJECT_ROOT / "data" / "threatingestor_artifacts.db"
-)
-THREATINGESTOR_ARTIFACT_DB = Path(
-    os.getenv(THREATINGESTOR_ARTIFACT_DB_ENV, str(_default_threatingestor_artifact_db))
-).expanduser()
-THREATINGESTOR_BRIDGE_INTERVAL = int(os.getenv(THREATINGESTOR_BRIDGE_INTERVAL_ENV, "30"))
-THREATINGESTOR_BRIDGE_BATCH = int(os.getenv(THREATINGESTOR_BRIDGE_BATCH_ENV, "100"))
-_default_threatingestor_config = (
-    Path("/app/threatingestor_config.yml")
-    if _in_container
-    else PROJECT_ROOT / "threatingestor_config.yml"
-)
-THREATINGESTOR_CONFIG_PATH = Path(
-    os.getenv(THREATINGESTOR_CONFIG_ENV, str(_default_threatingestor_config))
-).expanduser()
-THREATINGESTOR_SLEEP_BOOTSTRAP = int(os.getenv(THREATINGESTOR_SLEEP_BOOTSTRAP_ENV, "60"))
-THREATINGESTOR_SLEEP_STEADY = int(os.getenv(THREATINGESTOR_SLEEP_STEADY_ENV, "900"))
 ADWIN_DELTA = float(os.getenv(ADWIN_DELTA_ENV, "0.002"))
 FEATURE_SELECTION_K = int(os.getenv(FEATURE_SELECTION_K_ENV, "384"))
 OPTUNA_TRIALS = int(os.getenv(OPTUNA_TRIALS_ENV, "25"))
@@ -197,7 +164,7 @@ MALWARE_FALLBACK_PROVIDERS = tuple(
     for p in (
         _raw_malware_fallbacks
         if _raw_malware_fallbacks is not None
-        else "threatfox,twitter,dynamic_cti"
+        else "malshare,threatfox,dynamic_cti"
     ).split(",")
     if p.strip()
 )
@@ -373,7 +340,6 @@ def ensure_dirs() -> None:
         FIGURES_DIR,
         EVAL_STATE_PATH.parent,
         DRIFT_LOG_PATH.parent,
-        THREATINGESTOR_ARTIFACT_DB.parent,
         REPOS_DIR,
     ):
         path.mkdir(parents=True, exist_ok=True)

@@ -1,11 +1,10 @@
 """Tests for LangGraph routing."""
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 from src.graph import (
     build_graph,
     route_after_drift,
-    route_after_intel_ingest,
     route_after_pe_discovery,
     route_after_selector,
 )
@@ -38,9 +37,9 @@ def test_route_after_selector(mock_ctx):
         AgentState(
             expected_label=1,
             collection_phase="steady",
-            route_hint="threat_intel_ingest",
+            route_hint="source_discovery",
         )
-    ) == "threat_intel_ingest"
+    ) == "source_discovery"
     assert route_after_selector(
         AgentState(expected_label=1, collection_phase="steady", route_hint="source_discovery")
     ) == "source_discovery"
@@ -50,7 +49,7 @@ def test_route_after_selector(mock_ctx):
         AgentState(
             expected_label=1,
             collection_phase="steady",
-            route_hint="threat_intel_ingest",
+            route_hint="source_discovery",
         )
     ) == "source_discovery"
 
@@ -67,11 +66,11 @@ def test_route_after_selector_pe_discovery_disabled(_mock_pe):
             route_after_selector(
                 AgentState(
                     expected_label=1,
-                    route_hint="threat_intel_ingest",
+                    route_hint="source_discovery",
                     need_new_sources=True,
                 )
             )
-            == "threat_intel_ingest"
+            == "source_discovery"
         )
 
 
@@ -94,38 +93,25 @@ def test_route_pe_source_discovery_when_sparse(mock_store, _mock_enabled):
 
 
 def test_route_after_pe_discovery():
-    assert route_after_pe_discovery(
-        AgentState(route_hint="threat_intel_ingest")
-    ) == "threat_intel_ingest"
+    assert route_after_pe_discovery(AgentState(route_hint="source_discovery")) == "source_discovery"
     assert route_after_pe_discovery(AgentState()) == "source_discovery"
-
-
-def test_route_after_intel_ingest():
-    assert route_after_intel_ingest(AgentState(sample_candidates=[])) == "source_discovery"
-    assert route_after_intel_ingest(AgentState(sample_candidates=[{"x": 1}])) == "binary_fetch"
 
 
 @patch("src.graph._CHECKPOINTER", None)
 @patch("src.nodes.evaluation_node.EVAL_EVERY_RUNS", 1)
 @patch("src.evaluation.tesseract.run_tesseract_eval", return_value={})
 @patch("src.evaluation.tesseract.plot_performance_decay")
-@patch("src.nodes.threat_intel_ingest.build_collection_context")
 @patch("src.graph.build_collection_context")
 @patch("src.nodes.binary_fetch.download_pe_candidate")
-@patch("src.nodes.threat_intel_ingest.ThreatIntelCollector")
 @patch("src.graph.source_selector")
-@patch("src.nodes.threat_intel_ingest.discover_with_fallback", return_value=[])
-@patch("src.nodes.source_discovery.discover_with_fallback", return_value=[])
+@patch("src.nodes.source_discovery.discover_active_malware_sources")
 @patch("src.nodes.feature_extraction.extract_pe_features_with_error")
-def test_graph_malware_pending_queue_path(
+def test_graph_malware_source_discovery_path(
     mock_feats,
     mock_discover,
-    mock_ti_discover,
     mock_selector,
-    mock_intel_coll,
     mock_download,
     mock_graph_ctx,
-    mock_ti_ctx,
     mock_plot,
     mock_tesseract,
     tmp_paths,
@@ -140,15 +126,14 @@ def test_graph_malware_pending_queue_path(
         benign_count=100, malware_count=100, model_ready=True, pending_depth=1
     )
     mock_graph_ctx.return_value = steady_ctx
-    mock_ti_ctx.return_value = steady_ctx
 
     mock_selector.return_value = {
         "source_type": "malwarebazaar",
         "selected_sources": ["malwarebazaar"],
         "expected_label": 1,
-        "discovery_strategy": "intel_pending_queue",
+        "discovery_strategy": "steady_malware_active",
         "collection_phase": "steady",
-        "route_hint": "threat_intel_ingest",
+        "route_hint": "source_discovery",
         "cti_queries": [],
         "sample_candidates": [],
         "discovered_hashes": [],
@@ -167,32 +152,14 @@ def test_graph_malware_pending_queue_path(
         "intel_sources_polled": [],
     }
 
-    mock_coll = mock_intel_coll.return_value
-    mock_coll.sources.count_enabled.return_value = 1
-    mock_coll.seed_curated_sources.return_value = {"enabled": 1, "seeded": 0}
-    mock_coll.poll_threatingestor_artifacts.return_value = ([], {})
-    mock_coll.poll_due_feeds.return_value = []
-    mock_coll.last_native_poll_stats = {
-        "sources_due": 0,
-        "sources_polled": 0,
-        "entries": 0,
-        "pages_fetched": 0,
-        "raw_hashes": 0,
-        "raw_pe_urls": 0,
-        "returned": 0,
-        "sources_disabled": 0,
-        "source_urls": [],
-    }
-    mock_coll.validate_and_queue.return_value = {"queued": 0}
-    mock_coll.sources.all_sources.return_value = []
-    mock_coll.pending_to_candidates.return_value = [
+    mock_discover.return_value = [
         SampleCandidate(
             external_id=sha,
             provider="malwarebazaar",
             expected_label=1,
             download_ref={"sha256": sha},
             metadata={"discovery_source": "intel_rss"},
-        ).to_dict()
+        )
     ]
     mock_download.return_value = minimal_pe_path.path.read_bytes()
 
@@ -229,7 +196,7 @@ def test_graph_malware_pending_queue_path(
     assert final.source_type == "malwarebazaar"
     assert sha in final.discovered_hashes or len(final.feature_vectors) >= 0
     assert tracker.is_downloaded(sha)
-    mock_ti_discover.assert_called_once()
+    mock_discover.assert_called_once()
     mock_tesseract.assert_called_once()
 
 

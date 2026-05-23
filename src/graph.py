@@ -25,7 +25,6 @@ from src.ml.classifier import load_bundle, model_bundle_ready, training_targets_
 from src.nodes import (
     binary_fetch,
     classifier_inference,
-    threat_intel_ingest,
     data_validation,
     drift_monitor,
     evaluation_node,
@@ -61,15 +60,15 @@ def route_after_drift(state: AgentState) -> Literal["inference", "retrain"]:
 
 def route_after_selector(
     state: AgentState,
-) -> Literal["pe_source_discovery", "source_discovery", "threat_intel_ingest"]:
+) -> Literal["pe_source_discovery", "source_discovery"]:
+    if state.expected_label == -1:
+        return "source_discovery"
     if state.expected_label == 0:
         return "source_discovery"
     if build_collection_context().phase == "bootstrap":
         return "source_discovery"
     if _should_run_pe_source_discovery(state):
         return "pe_source_discovery"
-    if state.route_hint == "threat_intel_ingest":
-        return "threat_intel_ingest"
     return "source_discovery"
 
 
@@ -86,15 +85,7 @@ def _should_run_pe_source_discovery(state: AgentState) -> bool:
 
 def route_after_pe_discovery(
     state: AgentState,
-) -> Literal["threat_intel_ingest", "source_discovery"]:
-    if state.route_hint == "threat_intel_ingest":
-        return "threat_intel_ingest"
-    return "source_discovery"
-
-
-def route_after_intel_ingest(state: AgentState) -> Literal["binary_fetch", "source_discovery"]:
-    if state.sample_candidates:
-        return "binary_fetch"
+) -> Literal["source_discovery"]:
     return "source_discovery"
 
 
@@ -110,7 +101,6 @@ def build_graph():
 
     graph.add_node("source_selector", _wrap(source_selector))
     graph.add_node("pe_source_discovery", _wrap(pe_source_discovery))
-    graph.add_node("threat_intel_ingest", _wrap(threat_intel_ingest))
     graph.add_node("source_discovery", _wrap(source_discovery))
     graph.add_node("binary_fetch", _wrap(binary_fetch))
     graph.add_node("data_validation", _wrap(data_validation))
@@ -128,22 +118,12 @@ def build_graph():
         {
             "pe_source_discovery": "pe_source_discovery",
             "source_discovery": "source_discovery",
-            "threat_intel_ingest": "threat_intel_ingest",
         },
     )
     graph.add_conditional_edges(
         "pe_source_discovery",
         route_after_pe_discovery,
         {
-            "threat_intel_ingest": "threat_intel_ingest",
-            "source_discovery": "source_discovery",
-        },
-    )
-    graph.add_conditional_edges(
-        "threat_intel_ingest",
-        route_after_intel_ingest,
-        {
-            "binary_fetch": "binary_fetch",
             "source_discovery": "source_discovery",
         },
     )

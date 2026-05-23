@@ -70,7 +70,6 @@ COPY --from=capa-rules /opt/capa-rules /opt/capa-rules
 COPY src/ ./src/
 COPY scripts/ ./scripts/
 COPY docker/ ./docker/
-COPY threatingestor_config.yml ./threatingestor_config.yml
 RUN sed -i 's/\r$//' /app/docker/*.sh \
     && chmod +x /app/docker/*.sh \
     && mkdir -p /tmp/sandbox /data/models /data/benign \

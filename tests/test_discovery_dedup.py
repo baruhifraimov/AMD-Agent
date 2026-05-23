@@ -68,7 +68,7 @@ def test_duplicate_hash_excluded_within_same_discovery_pass():
     assert len(out) == 1
 
 
-def test_seen_source_url_excluded_from_discovery():
+def test_seen_source_url_still_returned_for_hash_check():
     url = "https://example.com/tool.exe"
     registry = _make_registry(
         lambda _limit: [
@@ -87,5 +87,6 @@ def test_seen_source_url_excluded_from_discovery():
         expected_label=0,
         limit=5,
     )
-    assert out == []
-    tracker.is_source_url_seen.assert_called_once_with(url)
+    assert len(out) == 1
+    tracker.is_source_url_seen.assert_not_called()
+    tracker.record_candidate_seen.assert_called()

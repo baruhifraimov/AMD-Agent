@@ -6,6 +6,7 @@ import hashlib
 import logging
 
 import src.db.tracker as db
+from src.collection.provider_stats import bump_provider
 from src.intel.collector import ThreatIntelCollector
 from src.sources.base import SampleCandidate
 from src.state import AgentState
@@ -23,6 +24,7 @@ def binary_fetch(state: AgentState) -> dict:
     paths: list[str] = []
     hashes: list[str] = []
     metadata: dict = dict(state.hash_metadata)
+    metrics = dict(state.bootstrap_metrics)
     failed = 0
     non_pe = 0
     skipped = 0
@@ -30,6 +32,7 @@ def binary_fetch(state: AgentState) -> dict:
 
     for raw in state.sample_candidates:
         candidate = SampleCandidate.from_dict(raw)
+        candidate_key = str(candidate.metadata.get("candidate_key") or "").strip()
         try:
             candidate_sha = str(candidate.download_ref.get("sha256") or candidate.external_id).lower()
             source_url = (
@@ -39,22 +42,35 @@ def binary_fetch(state: AgentState) -> dict:
                 or candidate.metadata.get("source_url")
                 or ""
             )
-            if source_url and tracker.is_source_url_seen(str(source_url)):
-                logger.info("Already seen source URL, skipping before fetch: %s", source_url)
-                skipped += 1
-                continue
+            if not candidate_key:
+                ref = source_url or candidate_sha or str(candidate.external_id)
+                candidate_key = f"{candidate.provider}:{ref}".lower()
             if len(candidate_sha) == 64 and tracker.is_corrupted(candidate_sha):
                 logger.info("Skipping previously corrupted sample: %s", candidate_sha)
+                bump_provider(metrics, candidate.provider, candidate.expected_label, failed=1)
+                tracker.record_candidate_outcome(candidate_key, status="corrupted")
                 skipped += 1
                 continue
             if len(candidate_sha) == 64 and tracker.is_downloaded(candidate_sha):
+                if source_url:
+                    tracker.record_sample_source(
+                        candidate_sha,
+                        source_provider=candidate.provider,
+                        source_url=str(source_url),
+                    )
                 logger.info("Already downloaded, skipping before fetch: %s", candidate_sha)
+                bump_provider(metrics, candidate.provider, candidate.expected_label, duplicate=1)
+                tracker.record_candidate_outcome(candidate_key, status="duplicate", sha256=candidate_sha)
                 skipped += 1
                 continue
+            bump_provider(metrics, candidate.provider, candidate.expected_label, download_attempted=1)
+            tracker.record_candidate_outcome(candidate_key, status="download_attempted", increment_attempts=True)
             content = download_pe_candidate(candidate)
             if len(content) < 2 or content[:2] != b"MZ":
                 logger.warning("Skipping non-PE download: %s", candidate.external_id)
                 intel.record_download_outcome(candidate.metadata, success=False)
+                bump_provider(metrics, candidate.provider, candidate.expected_label, non_pe=1, failed=1)
+                tracker.record_candidate_outcome(candidate_key, status="non_pe")
                 non_pe += 1
                 ext = candidate.external_id
                 if len(ext) == 64:
@@ -64,12 +80,18 @@ def binary_fetch(state: AgentState) -> dict:
                         "Downloaded content failed MZ signature check",
                         acquired_at=candidate.metadata.get("first_seen"),
                         label=candidate.expected_label,
+                        source_first_seen=(
+                            candidate.metadata.get("source_first_seen")
+                            or candidate.metadata.get("first_seen")
+                        ),
                     )
                     corrupted += 1
                 continue
             sha = hashlib.sha256(content).hexdigest()
             if tracker.is_corrupted(sha):
                 logger.info("Skipping previously corrupted content hash: %s", sha)
+                bump_provider(metrics, candidate.provider, candidate.expected_label, failed=1)
+                tracker.record_candidate_outcome(candidate_key, status="corrupted", sha256=sha)
                 skipped += 1
                 continue
             if tracker.is_downloaded(sha):
@@ -79,6 +101,8 @@ def binary_fetch(state: AgentState) -> dict:
                     source_url=str(source_url),
                 )
                 logger.info("Already downloaded, skipping: %s", sha)
+                bump_provider(metrics, candidate.provider, candidate.expected_label, duplicate=1)
+                tracker.record_candidate_outcome(candidate_key, status="duplicate", sha256=sha)
                 skipped += 1
                 continue
             path = save_pe_to_sandbox(sha, content)
@@ -91,15 +115,22 @@ def binary_fetch(state: AgentState) -> dict:
             meta["source_provider"] = candidate.provider
             if source_url:
                 meta["source_url"] = source_url
+            meta["source_first_seen"] = meta.get("source_first_seen") or meta.get("first_seen") or ""
+            meta["ingested_at"] = db.MalwareTracker.utc_now_iso()
+            meta["candidate_key"] = candidate_key
             metadata[sha] = meta
             intel.record_download_outcome(meta, success=True)
+            bump_provider(metrics, candidate.provider, candidate.expected_label, downloaded=1)
+            tracker.record_candidate_outcome(candidate_key, status="downloaded", sha256=sha)
         except Exception as exc:
             logger.warning("Download failed for %s: %s", candidate.external_id, exc)
             intel.record_download_outcome(candidate.metadata, success=False)
+            bump_provider(metrics, candidate.provider, candidate.expected_label, failed=1)
+            if candidate_key:
+                tracker.record_candidate_outcome(candidate_key, status="failed", error=str(exc))
             failed += 1
 
     logger.info("Fetched %d/%d binaries", len(paths), len(state.sample_candidates))
-    metrics = dict(state.bootstrap_metrics)
     metrics.update(
         {
             "download_attempted": len(state.sample_candidates),

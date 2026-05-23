@@ -11,12 +11,6 @@ from src.config import (
     CTI_SEED_SOURCES_ENABLED,
     MIN_TRAIN_MALWARE,
     PE_FETCH_LIMIT,
-    THREATINGESTOR_BRIDGE_BATCH,
-    THREATINGESTOR_ENABLED,
-)
-from src.intel.threatingestor_artifacts import (
-    finalize_threatingestor_marks,
-    poll_threatingestor_artifacts,
 )
 from src.intel.feed_discovery import (
     discover_candidate_urls,
@@ -38,7 +32,7 @@ SHA256_RE = re.compile(r"^[a-fA-F0-9]{64}$")
 
 
 class ThreatIntelCollector:
-    """In-process CTI collector with ThreatIngestor artifact poll (Plan B)."""
+    """In-process CTI collector for native public feed discovery."""
 
     def __init__(
         self,
@@ -183,27 +177,6 @@ class ThreatIntelCollector:
         self.last_native_poll_stats = poll_stats
         return out
 
-    def poll_threatingestor_artifacts(
-        self,
-        batch_size: int | None = None,
-    ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-        """Poll InQuest ThreatIngestor SQLite artifacts (sidecar producer)."""
-        if not THREATINGESTOR_ENABLED:
-            return [], {"disabled": 1}
-
-        ti_source_id = self.sources.ensure_threatingestor_source()
-        self.sources.record_poll_start(ti_source_id)
-
-        raw, stats = poll_threatingestor_artifacts(
-            batch_size=batch_size or THREATINGESTOR_BRIDGE_BATCH,
-            source_id=ti_source_id or None,
-        )
-        for item in raw:
-            self.sources.record_hashes_seen(ti_source_id)
-
-        stats["source_id"] = ti_source_id
-        return raw, stats
-
     def validate_and_queue(
         self,
         candidates: list[dict[str, Any]],
@@ -241,7 +214,6 @@ class ThreatIntelCollector:
             "existing_hashes": [],
         }
         per_source_queued: dict[int, int] = {}
-        ti_items = [c for c in candidates if c.get("_ti_artifact")]
         hash_items = [c for c in candidates if c.get("sha256")]
         url_items = [c for c in candidates if c.get("fallback_url") and not c.get("sha256")]
         stats["hash_candidates"] = len(hash_items)
@@ -321,20 +293,6 @@ class ThreatIntelCollector:
                 self.sources.schedule_next_poll(
                     sid,
                     queued_this_poll=per_source_queued.get(sid, 0),
-                    bootstrap=bootstrap,
-                )
-
-        if ti_items and THREATINGESTOR_ENABLED:
-            finalize_threatingestor_marks(
-                ti_items,
-                queued_hashes=set(stats["queued_hashes"]),
-                already_known=set(stats["existing_hashes"]),
-            )
-            ti_sid = self.sources.ensure_threatingestor_source()
-            if ti_sid:
-                self.sources.schedule_next_poll(
-                    ti_sid,
-                    queued_this_poll=per_source_queued.get(ti_sid, 0),
                     bootstrap=bootstrap,
                 )
 
@@ -480,9 +438,6 @@ class ThreatIntelCollector:
         if discover or self.sources.count_enabled() == 0:
             result["discover"] = self.discover_sources(max_sources=max_sources)
         raw: list[dict[str, Any]] = []
-        ti_raw, ti_stats = self.poll_threatingestor_artifacts()
-        result["threatingestor"] = ti_stats
-        raw.extend(ti_raw)
         if poll:
             native_raw = self.poll_due_feeds(
                 max_sources=max_sources,

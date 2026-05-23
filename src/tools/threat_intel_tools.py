@@ -18,12 +18,6 @@ def discover_intel_sources(max_sources: int = 8) -> str:
     return json.dumps(stats)
 
 
-def poll_threatingestor_artifacts(batch_size: int = 100) -> str:
-    """Poll InQuest ThreatIngestor SQLite artifacts for SHA256 IOCs."""
-    raw, stats = _collector().poll_threatingestor_artifacts(batch_size=batch_size)
-    return json.dumps({"candidates": raw, "stats": stats, "count": len(raw)})
-
-
 def poll_intel_feeds(max_sources: int = 5, max_candidates: int = 50) -> str:
     """Poll due intel feeds and return raw IOC candidates as JSON."""
     raw = _collector().poll_due_feeds(
@@ -60,11 +54,6 @@ def build_intel_tools() -> list[Any]:
         return discover_intel_sources(max_sources=max_sources)
 
     @tool
-    def poll_threatingestor_artifacts_tool(batch_size: int = 100) -> str:
-        """Poll ThreatIngestor sidecar artifact DB for curated feed hashes."""
-        return poll_threatingestor_artifacts(batch_size=batch_size)
-
-    @tool
     def poll_intel_feeds_tool(max_sources: int = 5, max_candidates: int = 50) -> str:
         """Poll due intel feeds for SHA256 hashes and PE URLs."""
         return poll_intel_feeds(max_sources=max_sources, max_candidates=max_candidates)
@@ -76,7 +65,6 @@ def build_intel_tools() -> list[Any]:
 
     return [
         discover_intel_sources_tool,
-        poll_threatingestor_artifacts_tool,
         poll_intel_feeds_tool,
         validate_and_queue_candidates_tool,
     ]

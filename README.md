@@ -10,9 +10,7 @@ The project is designed for isolated execution in Docker or a malware-analysis V
 START
   -> SourceSelector (bootstrap vs steady strategies)
       -> benign or bootstrap malware: SourceDiscovery
-      -> steady malware: ThreatIntelIngest (poll sidecar + feeds)
-          -> queue has hashes: BinaryFetch
-          -> queue empty: SourceDiscovery (dynamic_cti fallback)
+      -> steady malware: SourceDiscovery (MalwareBazaar + MalShare + fallback top-up)
   -> BinaryFetch
   -> DataValidation
   -> FeatureExtraction
@@ -24,7 +22,6 @@ START
 ### Main components
 
 - `SourceSelector`: asks Ollama to choose source strategy when available, with deterministic fallback based on malware/benign balance in SQLite.
-- `ThreatIntelIngest`: discovers CTI sources at runtime, polls RSS/feeds, validates PE hashes upstream, and loads pending candidates into graph state.
 - `SourceDiscovery`: discovers samples from one or more registered providers.
 - `BinaryFetch`: downloads through each candidate's own provider, not a global provider.
 - `DataValidation`: checks MZ header, validates `PE\0\0` at `e_lfanew`, verifies filename SHA256, de-duplicates, skips known corrupted hashes, and syncs SQLite status.
@@ -82,7 +79,7 @@ Dynamic CTI uses a Hybrid Strict policy: CTI pages are used only as evidence for
 - `docker/entrypoint.sh` blocks egress to private/local subnets with `iptables`.
 - `docker-compose.yml` grants `NET_ADMIN`, required for those `iptables` rules.
 - Docker allows the configured Ollama endpoint before private subnet blocking.
-- SQLite uses WAL mode to reduce lock errors with external ThreatIngestor writes.
+- SQLite uses WAL mode to reduce lock errors during long-running collection.
 - LangGraph uses `MemorySaver` checkpointer with default thread id `amd-agent-default`.
 - Downloaded samples are stored under sandbox paths and are never executed.
 - Benign collection fans out across selected providers (`sysinternals`, `github`, `benign_net`) and records source URLs/paths to avoid retrying the same assets.
@@ -107,8 +104,13 @@ Dynamic CTI uses a Hybrid Strict policy: CTI pages are used only as evidence for
 | `rejected_at` | rejection timestamp |
 | `source_provider` | originating provider when known |
 | `source_url` | originating URL when known; used to avoid re-fetching URL-only benign assets |
+| `ingested_at` | local ingestion timestamp used for TESSERACT chronological order |
+| `source_first_seen` | provider-side first-seen timestamp, when available |
 
-ThreatIntelIngest discovers sources, validates hashes, and loads pending malware rows where `file_path=''` and `status` is `pending` or `active`. Rows marked `corrupted` are not retried.
+Dynamic CTI fallback can validate hashes and load pending malware rows where `file_path=''` and `status` is `pending` or `active`. Rows marked `corrupted` are not retried.
+
+`provider_runs` stores recent provider yield metrics and drives cooldowns.
+`candidates` stores provider refs/status/attempts without storing PE bytes.
 
 ## Requirements
 
@@ -137,7 +139,7 @@ Installed dependencies include:
 - `xgboost`, `optuna`, `capstone`
 - `numpy`, `pandas`, `joblib`, `matplotlib`
 - `pytest`, `pytest-httpx`
-- `feedparser`, `threatingestor[rss]`, `regex`
+- `feedparser`, `regex`
 
 ## Configuration
 
@@ -198,11 +200,14 @@ Other useful variables:
 | `AMD_PE_DISCOVERY_MAX_URLS_PER_RUN` | max URLs fetched/classified per discovery pass (default `8`) |
 | `MIN_PE_SOURCES` | run PE discovery when active `pe_sources` count is below this (default `3`) |
 | `AMD_ALLOW_LOCAL_BENIGN` | ingest `data/benign/*` as label `0` |
-| `AMD_INTEL_INGEST_ENABLED` | enable/disable integrated threat intel ingest node |
 | `AMD_CTI_SEED_SOURCES_ENABLED` | seed known CTI feeds into `intel_sources` before polling (default `1`) |
 | `AMD_INTEL_MIN_POLL_INTERVAL` | minimum seconds between polls per high-yield source |
 | `AMD_INTEL_MAX_POLL_INTERVAL` | maximum seconds between polls per low-yield source |
-| `AMD_INTEL_PENDING_CAP_MULT` | skip polling when pending queue exceeds `PE_FETCH_LIMIT * mult` |
+| `AMD_PROVIDER_COOLDOWN_ZERO_RUNS` | zero-yield provider runs before cooldown (default `3`) |
+| `AMD_PROVIDER_COOLDOWN_SECONDS` | provider cooldown duration in seconds (default `43200`) |
+| `AMD_PROVIDER_COOLDOWN_MIN_ATTEMPTS` | minimum requested/attempted candidates before cooldown applies (default `5`) |
+| `AMD_STEADY_BENIGN_EVERY_N` | benign refresh cadence once temporal splits are healthy (default `4`) |
+| `AMD_TESSERACT_MIXED_UNTIL_HEALTHY` | collect mixed malware/benign steady batches until temporal splits contain both labels (default `1`) |
 | `AMD_OLLAMA_SOURCE_SELECTION` | bind intel `@tool`s for Ollama source selection |
 | `AMD_CTI_DOWNLOAD_ALLOWLIST` | comma-separated hosts allowed for direct PE URL fallback |
 | `AMD_PE_FETCH_LIMIT` | max candidates returned per discovery pass (default `10`) |
@@ -327,48 +332,34 @@ git clone https://github.com/mandiant/capa-rules.git C:\capa-rules
 $env:AMD_CAPA_RULES_DIR="C:\capa-rules"
 ```
 
-## ThreatIntel + ThreatIngestor (Plan B)
+## Malware CTI Fallback
 
-Dual-path malware IOC collection:
+Steady malware collection goes directly through active source discovery:
+MalwareBazaar plus MalShare when enabled. If those sources under-fill the batch,
+the configured fallback chain can include `threatfox` and `dynamic_cti`.
 
-1. **[InQuest ThreatIngestor](https://github.com/InQuest/ThreatIngestor)** sidecar — curated RSS/plugin feeds → `/data/threatingestor_artifacts.db`
-2. **ThreatIntelCollector** (in-process) — polls TI artifacts, validates, queues; plus runtime feed discovery via `intel_sources`
-
-The native collector seeds high-signal public CTI feeds on every steady-state
-pass (DFIR Report, Cisco Talos, Google Threat Intelligence, CISA advisories,
-Unit42, Securelist, and Malwarebytes) before falling back to DDG-based source
-discovery. Search results from academic/paywalled hosts are ignored because they
-rarely produce actionable PE SHA256 indicators.
+`dynamic_cti` uses the native collector to seed high-signal public CTI feeds
+(DFIR Report, Cisco Talos, Google Threat Intelligence, CISA advisories, Unit42,
+Securelist, and Malwarebytes) before falling back to web-search source discovery.
+Search results from academic/paywalled hosts are ignored because they rarely
+produce actionable PE SHA256 indicators.
 
 | Capability | Implementation |
 |---|---|
-| Curated CTI feeds | `src/intel/seed_sources.py` for in-process polling, plus `threatingestor_config.yml` for the sidecar |
-| Artifact ingest | `src/intel/threatingestor_artifacts.py` polled by `threat_intel_ingest` |
+| Curated CTI feeds | `src/intel/seed_sources.py` for in-process polling |
 | Dynamic source discovery | Web search + LLM → `intel_sources` (native `feedparser` polls) |
 | Upstream validation | SHA256 + MalwareBazaar `is_pe_hash` before pending insert |
 | Multi-provider download | `src/tools/pe_download.py`: MB (retry) → allowlisted URL |
-| LangGraph tools | `poll_threatingestor_artifacts`, `discover_intel_sources`, `poll_intel_feeds`, `validate_and_queue_candidates` |
+| LangGraph tools | `discover_intel_sources`, `poll_intel_feeds`, `validate_and_queue_candidates` |
 
-Run both services:
+Run the agent:
 
 ```powershell
 docker compose up --force-recreate
 ```
 
-Run only the ThreatIngestor producer:
-
-```powershell
-docker compose up threatingestor
-```
-
 | Env var | Purpose |
 |---|---|
-| `AMD_THREATINGESTOR_ENABLED` | Poll TI artifact DB from amd-agent (default `1`) |
-| `AMD_THREATINGESTOR_ARTIFACT_DB` | Path to TI SQLite operator DB |
-| `AMD_THREATINGESTOR_BRIDGE_BATCH` | Max artifact rows per graph ingest pass |
-| `AMD_THREATINGESTOR_SLEEP_BOOTSTRAP` | Seconds between TI passes until 100/100 trainable samples (default `60`) |
-| `AMD_THREATINGESTOR_SLEEP_STEADY` | Seconds between TI passes after initial collection (default `900`) |
-| `AMD_INTEL_INGEST_ENABLED` | Enable `threat_intel_ingest` node |
 | `AMD_CTI_SEED_SOURCES_ENABLED` | Keep curated CTI feeds enabled in the native source registry |
 
 Pending row contract:
@@ -397,6 +388,11 @@ skipped instead of emitting misleading precision/recall. Cold-start training
 uses a stratified split so the initial 100/100 bootstrap model is stable even
 when provider batches arrive in an uneven chronological order; temporal
 TESSERACT remains the research/evaluation view.
+
+New samples sort temporal evaluation by `ingested_at`; provider timestamps such
+as MalwareBazaar `first_seen` are preserved as `source_first_seen` but do not
+control TESSERACT chronology. While train/validation/test splits are
+single-class, steady collection switches to mixed malware/benign batches.
 
 Local default figure path:
 
@@ -456,9 +452,8 @@ Before leaving the stack running continuously:
 
 1. `python scripts/preflight_check.py` — phase, per-class trainable counts, bundle ready, pending depth.
 2. `docker compose up` — logs show `bootstrap skipped` or bootstrap complete, then `Scheduler started`.
-3. Steady malware passes hit `ThreatIntelIngest` first; underfilled CTI batches are topped up by active MalwareBazaar/MalShare discovery.
-4. `threatingestor` sidecar logs `AMD_COLLECTION_PHASE=steady` (not bootstrap skip loop).
-5. After new samples extract features, ADWIN updates use `AMD_ADWIN_DELTA` (tune if single-file retrains are too frequent).
+3. Steady malware passes hit active MalwareBazaar/MalShare discovery directly, with fallback top-up if needed.
+4. After new samples extract features, ADWIN updates use `AMD_ADWIN_DELTA` (tune if single-file retrains are too frequent).
 
 ## Known Runtime Checklist
 
@@ -521,7 +516,7 @@ $env:AMD_CAPA_RULES_DIR="C:\capa-rules"
 
 ### SQLite locked
 
-WAL mode is enabled. If locks persist, ensure ThreatIngestor and AMD-Agent point to same DB path and no long-lived manual SQLite shell holds a transaction.
+WAL mode is enabled. If locks persist, ensure no long-lived manual SQLite shell holds a transaction.
 
 ## Security Notes
 

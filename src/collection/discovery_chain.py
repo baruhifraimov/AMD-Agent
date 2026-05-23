@@ -16,29 +16,56 @@ logger = logging.getLogger(__name__)
 
 def _known_bad_or_downloaded(candidate: SampleCandidate, tracker: db.MalwareTracker) -> bool:
     sha = str(candidate.download_ref.get("sha256") or candidate.external_id).lower()
-    if len(sha) == 64 and (
+    return len(sha) == 64 and (
         tracker.is_downloaded(sha)
         or tracker.is_corrupted(sha)
         or tracker.is_pending(sha)
-    ):
-        return True
-    source_url = str(
+    )
+
+
+def _candidate_key(candidate: SampleCandidate) -> str:
+    ref = candidate.download_ref
+    for key in ("sha256", "fallback_url", "url", "path"):
+        value = str(ref.get(key) or "").strip().lower()
+        if value:
+            return value
+    return str(candidate.external_id).strip().lower()
+
+
+def _candidate_source_url(candidate: SampleCandidate) -> str:
+    return str(
         candidate.download_ref.get("url")
         or candidate.download_ref.get("fallback_url")
         or candidate.download_ref.get("path")
         or candidate.metadata.get("source_url")
         or ""
+    ).strip()
+
+
+def _candidate_db_key(candidate: SampleCandidate) -> str:
+    return f"{candidate.provider}:{_candidate_key(candidate)}"
+
+
+def _record_candidate_seen(
+    tracker: db.MalwareTracker,
+    candidate: SampleCandidate,
+    *,
+    status: str,
+) -> None:
+    key = _candidate_db_key(candidate)
+    if not key:
+        return
+    candidate.metadata["candidate_key"] = key
+    sha = str(candidate.download_ref.get("sha256") or "").lower()
+    tracker.record_candidate_seen(
+        candidate_key=key,
+        provider=candidate.provider,
+        label=candidate.expected_label,
+        external_id=str(candidate.external_id),
+        sha256=sha if len(sha) == 64 else "",
+        source_url=_candidate_source_url(candidate),
+        status=status,
     )
-    return bool(source_url and tracker.is_source_url_seen(source_url))
-
-
-def _candidate_key(candidate: SampleCandidate) -> str:
-    ref = candidate.download_ref
-    for key in ("sha256", "fallback_url", "url"):
-        value = str(ref.get(key) or "").strip().lower()
-        if value:
-            return value
-    return str(candidate.external_id).strip().lower()
 
 
 def _append_fresh_candidates(
@@ -52,15 +79,19 @@ def _append_fresh_candidates(
     fresh = 0
     returned = 0
     for candidate in discovered:
+        _record_candidate_seen(tracker, candidate, status="seen")
         key = _candidate_key(candidate)
         if not key or key in seen:
+            tracker.record_candidate_outcome(_candidate_db_key(candidate), status="duplicate")
             continue
         if _known_bad_or_downloaded(candidate, tracker):
+            tracker.record_candidate_outcome(_candidate_db_key(candidate), status="duplicate")
             continue
         seen.add(key)
         fresh += 1
         if len(candidates) < fetch_limit:
             candidates.append(candidate)
+            tracker.record_candidate_outcome(_candidate_db_key(candidate), status="returned")
             returned += 1
     return fresh, returned
 
@@ -141,10 +172,11 @@ def discover_active_malware_sources(
         if slot <= 0:
             continue
         provider_name = source_name
+        request_limit = max(slot * 5, 1)
         try:
             provider_name, discovered = _discover_source_candidates(
                 source_name,
-                request_limit=max(slot * 5, 1),
+                request_limit=request_limit,
                 registry=registry,
                 tracker=tracker,
                 cti_queries=cti_queries,
@@ -156,6 +188,7 @@ def discover_active_malware_sources(
                     {
                         "stage": "active_malware_fill",
                         "provider": provider_name,
+                        "requested": request_limit,
                         "discovered": 0,
                         "fresh": 0,
                         "returned": 0,
@@ -178,6 +211,7 @@ def discover_active_malware_sources(
                 {
                     "stage": "active_malware_fill",
                     "provider": provider_name,
+                    "requested": request_limit,
                     "discovered": len(discovered),
                     "fresh": fresh,
                     "returned": returned,
@@ -268,10 +302,11 @@ def discover_active_benign_sources(
         if slot <= 0:
             continue
         provider_name = source_name
+        request_limit = max(slot * 5, 1)
         try:
             provider_name, discovered = _discover_source_candidates(
                 source_name,
-                request_limit=max(slot * 5, 1),
+                request_limit=request_limit,
                 registry=registry,
                 tracker=tracker,
             )
@@ -282,6 +317,7 @@ def discover_active_benign_sources(
                     {
                         "stage": "active_benign_fill",
                         "provider": provider_name,
+                        "requested": request_limit,
                         "discovered": 0,
                         "fresh": 0,
                         "returned": 0,
@@ -304,6 +340,7 @@ def discover_active_benign_sources(
                 {
                     "stage": "active_benign_fill",
                     "provider": provider_name,
+                    "requested": request_limit,
                     "discovered": len(discovered),
                     "fresh": fresh,
                     "returned": returned,
@@ -337,6 +374,68 @@ def discover_active_benign_sources(
                 stats.append(topup_item)
 
     return candidates[:fetch_limit]
+
+
+def discover_mixed_sources(
+    source_names: list[str],
+    *,
+    registry: SourceRegistry | None = None,
+    tracker: db.MalwareTracker | None = None,
+    ctx: CollectionContext | None = None,
+    limit: int | None = None,
+    cti_queries: list[str] | None = None,
+    stats: list[dict] | None = None,
+) -> list[SampleCandidate]:
+    """Discover an interleaved malware/benign batch for temporal split health."""
+    registry = registry or get_registry()
+    tracker = tracker or db.get_tracker()
+    if ctx is None:
+        ctx = build_collection_context(tracker)
+    fetch_limit = limit or PE_FETCH_LIMIT
+    benign_sources = [
+        name
+        for name in list(dict.fromkeys(source_names))
+        if name in BENIGN_PROVIDER_NAMES and name in set(registry.list_names())
+    ]
+    if not benign_sources:
+        benign_sources = [name for name in BENIGN_PROVIDER_NAMES if name in set(registry.list_names())]
+
+    malware_limit = (fetch_limit + 1) // 2
+    benign_limit = fetch_limit // 2
+    malware_stats: list[dict] = []
+    benign_stats: list[dict] = []
+    malware = discover_active_malware_sources(
+        ["malwarebazaar"],
+        registry=registry,
+        tracker=tracker,
+        ctx=ctx,
+        limit=malware_limit,
+        cti_queries=cti_queries,
+        stats=malware_stats,
+    )
+    benign = discover_active_benign_sources(
+        benign_sources,
+        registry=registry,
+        tracker=tracker,
+        ctx=ctx,
+        limit=benign_limit,
+        stats=benign_stats,
+    )
+    if stats is not None:
+        for item in [*malware_stats, *benign_stats]:
+            mixed = dict(item)
+            mixed["mixed"] = 1
+            stats.append(mixed)
+
+    out: list[SampleCandidate] = []
+    for idx in range(max(len(malware), len(benign))):
+        if idx < len(malware):
+            out.append(malware[idx])
+        if idx < len(benign):
+            out.append(benign[idx])
+        if len(out) >= fetch_limit:
+            break
+    return out[:fetch_limit]
 
 
 def discover_with_fallback(
@@ -390,6 +489,7 @@ def discover_with_fallback(
                     {
                         "stage": "discovery",
                         "provider": provider_name,
+                        "requested": request_limit,
                         "discovered": 0,
                         "fresh": 0,
                         "returned": 0,
@@ -411,6 +511,7 @@ def discover_with_fallback(
                 {
                     "stage": "discovery",
                     "provider": provider_name,
+                    "requested": request_limit,
                     "discovered": len(discovered),
                     "fresh": fresh,
                     "returned": returned,

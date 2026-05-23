@@ -19,12 +19,11 @@ VERIFIED_DISCOVERY_SOURCES = frozenset(
         "github",
         "dynamic_cti",
         "intel_rss",
-        "intel_threatingestor",
         "intel_discover",
         "bootstrap_fast_path",
         "steady_explore",
         "steady_benign_balance",
-        "intel_pending_queue",
+        "steady_malware_active",
     }
 )
 

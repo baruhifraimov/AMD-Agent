@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 
+import src.db.tracker as db
 from src.config import (
     BENIGN_PROVIDER_NAMES,
     MIN_TRAIN_BENIGN,
@@ -27,18 +28,24 @@ def next_label(n_malware: int, n_benign: int) -> int:
     if n_benign == 0:
         return 0
     ratio = n_malware / n_benign
-    if ratio > TARGET_MALWARE_BENIGN_RATIO:
+    if ratio > TARGET_MALWARE_BENIGN_RATIO * 1.10:
         return 0
-    if ratio < TARGET_MALWARE_BENIGN_RATIO:
+    if ratio < TARGET_MALWARE_BENIGN_RATIO * 0.90:
         return 1
     return 1
 
 
-def choose_benign_provider(registry: SourceRegistry) -> PESourceProvider:
-    return registry.get(choose_benign_sources(registry)[0])
+def choose_benign_provider(
+    registry: SourceRegistry,
+    tracker: db.MalwareTracker | None = None,
+) -> PESourceProvider:
+    return registry.get(choose_benign_sources(registry, tracker)[0])
 
 
-def choose_benign_sources(registry: SourceRegistry) -> list[str]:
+def choose_benign_sources(
+    registry: SourceRegistry,
+    tracker: db.MalwareTracker | None = None,
+) -> list[str]:
     forced = os.getenv("AMD_BENIGN_PROVIDER", "").strip().lower()
     if forced:
         return [registry.get(forced).name]
@@ -55,7 +62,7 @@ def choose_benign_sources(registry: SourceRegistry) -> list[str]:
                     for n in BENIGN_PROVIDER_NAMES
                     if n in registry.list_names() and n not in names
                 )
-                return names
+                return _rank_benign_sources(names, tracker)
         except Exception:
             pass
 
@@ -65,4 +72,16 @@ def choose_benign_sources(registry: SourceRegistry) -> list[str]:
         raise RuntimeError("No benign providers registered")
     start = _BENIGN_ROUND_ROBIN_IDX % len(names)
     _BENIGN_ROUND_ROBIN_IDX += 1
-    return names[start:] + names[:start]
+    return _rank_benign_sources(names[start:] + names[:start], tracker)
+
+
+def _rank_benign_sources(
+    names: list[str],
+    tracker: db.MalwareTracker | None = None,
+) -> list[str]:
+    if not names:
+        return names
+    tracker = tracker or db.get_tracker()
+    ranked = tracker.rank_providers_by_yield(names, 0)
+    active = [name for name in ranked if not tracker.is_provider_cooled_down(name, 0)]
+    return active or ranked

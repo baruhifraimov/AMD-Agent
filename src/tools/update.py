@@ -30,9 +30,14 @@ def insert_sample(
     )
 
 
-def update_file_path(tracker: db.MalwareTracker, sha256: str, file_path: str) -> None:
+def update_file_path(
+    tracker: db.MalwareTracker,
+    sha256: str,
+    file_path: str,
+    **kwargs: Any,
+) -> None:
     logger.debug("Update tool: file_path for %s", sha256[:12])
-    tracker.update_file_path(sha256, file_path)
+    tracker.update_file_path(sha256, file_path, **kwargs)
 
 
 def update_features(tracker: db.MalwareTracker, sha256: str, features: dict[str, Any]) -> None:
@@ -61,6 +66,7 @@ def insert_pending_hash(
     *,
     acquired_at: str | None = None,
     label: int = 1,
+    **kwargs: Any,
 ) -> None:
     logger.debug("Update tool: insert_pending_hash for %s", sha256[:12])
-    tracker.insert_pending_hash(sha256, acquired_at=acquired_at, label=label)
+    tracker.insert_pending_hash(sha256, acquired_at=acquired_at, label=label, **kwargs)

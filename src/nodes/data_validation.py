@@ -6,6 +6,7 @@ import logging
 from pathlib import Path
 
 import src.db.tracker as db
+from src.collection.provider_stats import bump_provider
 from src.state import AgentState
 from src.tools.update import insert_sample, mark_corrupted, update_file_path
 from src.tools.validate import file_sha256, is_duplicate, is_pe_mz, is_pe_signature
@@ -17,6 +18,7 @@ def data_validation(state: AgentState) -> dict:
     tracker = db.get_tracker()
     valid_paths: list[str] = []
     valid_hashes: list[str] = []
+    metrics = dict(state.bootstrap_metrics)
     corrupted = 0
     skipped = 0
 
@@ -29,11 +31,14 @@ def data_validation(state: AgentState) -> dict:
             continue
         if tracker.is_corrupted(sha):
             logger.info("Skipping previously corrupted hash: %s", sha)
+            meta = state.hash_metadata.get(sha, {})
+            bump_provider(metrics, str(meta.get("source_provider") or ""), meta.get("expected_label"), failed=1)
             skipped += 1
             continue
         if not is_pe_mz(path):
             logger.warning("MZ check failed: %s", sha)
             meta = state.hash_metadata.get(sha, {})
+            bump_provider(metrics, str(meta.get("source_provider") or ""), meta.get("expected_label"), non_pe=1, failed=1)
             mark_corrupted(
                 tracker,
                 sha,
@@ -41,12 +46,14 @@ def data_validation(state: AgentState) -> dict:
                 file_path=path,
                 acquired_at=meta.get("first_seen"),
                 label=int(meta.get("expected_label", state.expected_label)),
+                source_first_seen=meta.get("source_first_seen") or meta.get("first_seen"),
             )
             corrupted += 1
             continue
         if not is_pe_signature(path):
             logger.warning("PE signature check failed: %s", sha)
             meta = state.hash_metadata.get(sha, {})
+            bump_provider(metrics, str(meta.get("source_provider") or ""), meta.get("expected_label"), non_pe=1, failed=1)
             mark_corrupted(
                 tracker,
                 sha,
@@ -54,6 +61,7 @@ def data_validation(state: AgentState) -> dict:
                 file_path=path,
                 acquired_at=meta.get("first_seen"),
                 label=int(meta.get("expected_label", state.expected_label)),
+                source_first_seen=meta.get("source_first_seen") or meta.get("first_seen"),
             )
             corrupted += 1
             continue
@@ -61,6 +69,7 @@ def data_validation(state: AgentState) -> dict:
         if actual_sha != sha:
             logger.warning("SHA256 filename mismatch: path=%s expected=%s actual=%s", path, sha, actual_sha)
             meta = state.hash_metadata.get(sha, {})
+            bump_provider(metrics, str(meta.get("source_provider") or ""), meta.get("expected_label"), failed=1)
             mark_corrupted(
                 tracker,
                 sha,
@@ -68,36 +77,50 @@ def data_validation(state: AgentState) -> dict:
                 file_path=path,
                 acquired_at=meta.get("first_seen"),
                 label=int(meta.get("expected_label", state.expected_label)),
+                source_first_seen=meta.get("source_first_seen") or meta.get("first_seen"),
             )
             corrupted += 1
             continue
         if is_duplicate(sha, tracker):
             logger.info("Duplicate hash skipped: %s", sha)
+            meta = state.hash_metadata.get(sha, {})
+            bump_provider(metrics, str(meta.get("source_provider") or ""), meta.get("expected_label"), duplicate=1)
             skipped += 1
             continue
 
         meta = state.hash_metadata.get(sha, {})
-        acquired = meta.get("first_seen") or db.MalwareTracker.utc_now_iso()
+        ingested = meta.get("ingested_at") or db.MalwareTracker.utc_now_iso()
         label = int(meta.get("expected_label", state.expected_label))
+        source_first_seen = meta.get("source_first_seen") or meta.get("first_seen") or None
 
         if tracker.is_pending(sha):
-            update_file_path(tracker, sha, path)
+            update_file_path(
+                tracker,
+                sha,
+                path,
+                source_provider=meta.get("source_provider"),
+                source_url=meta.get("source_url"),
+                ingested_at=ingested,
+                source_first_seen=source_first_seen,
+            )
             logger.info("Updated pending row with file_path: %s", sha)
         else:
             insert_sample(
                 tracker,
                 sha,
                 path,
-                acquired,
+                ingested,
                 label=label,
                 source_provider=meta.get("source_provider"),
                 source_url=meta.get("source_url"),
+                ingested_at=ingested,
+                source_first_seen=source_first_seen,
             )
 
+        bump_provider(metrics, str(meta.get("source_provider") or ""), label, valid_pe=1)
         valid_paths.append(path)
         valid_hashes.append(sha)
 
-    metrics = dict(state.bootstrap_metrics)
     metrics.update(
         {
             "pe_validation_input": len(state.downloaded_paths),

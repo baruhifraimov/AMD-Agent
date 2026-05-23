@@ -9,7 +9,6 @@ from pathlib import Path
 from typing import Any, Iterator
 
 from src.config import DB_PATH, INTEL_MAX_POLL_INTERVAL, INTEL_MIN_POLL_INTERVAL, ensure_dirs
-from src.intel.threatingestor_artifacts import THREATINGESTOR_SOURCE_URL
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS intel_sources (
@@ -111,7 +110,6 @@ class IntelSourceStore:
                 """
                 SELECT * FROM intel_sources
                 WHERE enabled = 1
-                  AND source_type != 'threatingestor'
                   AND next_poll_at <= ?
                 ORDER BY yield_ratio DESC, next_poll_at ASC
                 LIMIT ?
@@ -259,16 +257,6 @@ class IntelSourceStore:
                 "SELECT * FROM intel_sources ORDER BY yield_ratio DESC, url ASC"
             ).fetchall()
         return [dict(r) for r in rows]
-
-    def ensure_threatingestor_source(self) -> int:
-        """Virtual registry row for ThreatIngestor artifact yield tracking."""
-        sid = self.upsert_source(
-            THREATINGESTOR_SOURCE_URL,
-            source_type="threatingestor",
-            discovery_query="InQuest ThreatIngestor SQLite artifacts",
-        )
-        return int(sid) if sid is not None else 0
-
 
 def get_intel_source_store(db_path: Path | None = None) -> IntelSourceStore:
     return IntelSourceStore(db_path)

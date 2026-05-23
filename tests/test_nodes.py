@@ -171,6 +171,8 @@ def test_binary_fetch_uses_candidate_provider(mock_download, mock_intel_cls, tmp
 
     assert len(out["downloaded_paths"]) == 2
     assert out["bootstrap_metrics"]["downloaded_count"] == 2
+    assert out["bootstrap_metrics"]["provider_stats"]["sysinternals:0"]["downloaded"] == 1
+    assert out["bootstrap_metrics"]["provider_stats"]["github:0"]["downloaded"] == 1
     assert all("source_url" in meta for meta in out["hash_metadata"].values())
     assert mock_download.call_count == 2
 
@@ -241,6 +243,31 @@ def test_source_discovery_uses_active_malware_sources_for_bootstrap_malware(
     ]
     mock_active.assert_called_once()
     mock_fallback.assert_not_called()
+
+
+@patch("src.nodes.source_discovery.discover_mixed_sources")
+def test_source_discovery_uses_mixed_sources(mock_discover, tmp_paths):
+    def discover_side_effect(*args, **kwargs):
+        kwargs["stats"].extend(
+            [
+                {"provider": "malwarebazaar", "label": 1, "discovered": 1, "fresh": 1, "returned": 1},
+                {"provider": "sysinternals", "label": 0, "discovered": 1, "fresh": 1, "returned": 1},
+            ]
+        )
+        return [
+            SampleCandidate("a" * 64, "malwarebazaar", 1, {"sha256": "a" * 64}),
+            SampleCandidate("https://example.com/a.exe", "sysinternals", 0, {"url": "https://example.com/a.exe"}),
+        ]
+
+    mock_discover.side_effect = discover_side_effect
+
+    out = source_discovery(
+        AgentState(selected_sources=["malwarebazaar", "sysinternals"], expected_label=-1)
+    )
+
+    assert [c["expected_label"] for c in out["sample_candidates"]] == [1, 0]
+    assert out["bootstrap_metrics"]["provider_stats"]["malwarebazaar:1"]["returned"] == 1
+    assert out["bootstrap_metrics"]["provider_stats"]["sysinternals:0"]["returned"] == 1
 
 
 @patch("src.nodes.binary_fetch.download_pe_candidate")
@@ -360,10 +387,15 @@ def test_feature_extraction(mock_extract, tmp_paths, minimal_pe_path):
         },
         None,
     )
-    state = AgentState(downloaded_paths=[str(minimal_pe_path.path)])
+    state = AgentState(
+        downloaded_paths=[str(minimal_pe_path.path)],
+        collection_phase="steady",
+        hash_metadata={sha: {"source_provider": "malwarebazaar", "expected_label": 1}},
+    )
     out = feature_extraction(state)
     assert len(out["feature_vectors"]) == 1
     assert out["bootstrap_metrics"]["feature_extracted_count"] == 1
+    assert tmp_paths["tracker"].provider_recent_stats("malwarebazaar", 1)["feature_extracted"] == 1
 
 
 @patch("src.nodes.feature_extraction.triage_pe_error", return_value="reject")

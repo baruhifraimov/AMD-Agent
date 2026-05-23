@@ -18,13 +18,13 @@ def source_selector(state: AgentState) -> dict:
     registry = get_registry()
     tracker = db.get_tracker()
     ctx = build_collection_context(tracker)
-    selection = CollectionStrategyFactory.create(ctx).select(ctx)
+    selection = CollectionStrategyFactory.create(ctx, tracker=tracker).select(ctx)
     counts = tracker.count_by_label()
     available_sources = registry.list_names()
     source_labels = {name: registry.get(name).expected_label for name in available_sources}
 
     decision = None
-    if ctx.phase == "steady" and ollama_source_selection_enabled():
+    if ctx.phase == "steady" and selection.expected_label != -1 and ollama_source_selection_enabled():
         decision = choose_sources_with_ollama(
             available_sources=available_sources,
             source_labels=source_labels,

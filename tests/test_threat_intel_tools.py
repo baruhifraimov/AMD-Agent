@@ -21,16 +21,6 @@ def test_validate_and_queue_tool(mock_coll):
     assert out["queued"] == 1
 
 
-@patch("src.tools.threat_intel_tools._collector")
-def test_poll_threatingestor_tool(mock_coll):
-    mock_coll.return_value.poll_threatingestor_artifacts.return_value = (
-        [{"sha256": "d" * 64}],
-        {"candidates": 1},
-    )
-    out = json.loads(ti_tools.poll_threatingestor_artifacts(batch_size=50))
-    assert out["count"] == 1
-
-
-def test_build_intel_tools_returns_four():
+def test_build_intel_tools_returns_three():
     tools = ti_tools.build_intel_tools()
-    assert len(tools) == 4
+    assert len(tools) == 3

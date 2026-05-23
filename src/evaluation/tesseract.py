@@ -60,6 +60,10 @@ def run_tesseract_eval(
     if len(y) < 5:
         logger.warning("Insufficient samples for TESSERACT eval: %d", len(y))
         return {}
+    health = tracker.temporal_split_health(train_ratio=train_ratio, val_ratio=val_ratio)
+    if not bool(health.get("healthy")):
+        logger.info("TESSERACT skipped: unhealthy temporal split %s", health)
+        return {}
 
     n = len(y)
     train_end = int(n * train_ratio)

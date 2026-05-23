@@ -23,27 +23,6 @@ services:
     networks:
       - malware_net
 
-  threatingestor:
-    build: .
-    command: ["/app/docker/threatingestor-entrypoint.sh"]
-    env_file:
-      - path: .env
-        required: false
-    environment:
-      AMD_AGENT_CONTAINER: "1"
-    volumes:
-      - ./src:/app/src:ro
-      - ./scripts:/app/scripts:ro
-      - ./threatingestor_config.yml:/app/threatingestor_config.yml:ro
-      - ./data:/data
-    cap_add:
-      - NET_ADMIN
-    extra_hosts:
-      - "ollama-host:host-gateway"
-      - "host.docker.internal:host-gateway"
-    networks:
-      - malware_net
-
 networks:
   malware_net:
     driver: bridge

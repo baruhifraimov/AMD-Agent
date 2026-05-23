@@ -124,11 +124,10 @@ def choose_sources_with_ollama(
         "The only required argument is source_type. "
         "Choose either malware-oriented sources or benign-oriented sources, not both. "
         "Use dynamic_cti for broad web malware hash discovery. "
-        "When AMD_THREATINGESTOR_ENABLED, curated IOCs come from poll_threatingestor_artifacts. "
         "When malware is needed and intel registry is empty, call discover_intel_sources. "
         "When malware queue is shallow, call poll_intel_feeds then validate_and_queue_candidates. "
         "If benign samples are underrepresented, prefer all benign providers. "
-        "If malware is needed, prefer threat intel ingest path and malwarebazaar. "
+        "If malware is needed, prefer malwarebazaar and active malware fallbacks. "
         "Do not provide expected_label; the program derives labels from the registry."
     )
     tools = [select_source_strategy, *intel_tools]

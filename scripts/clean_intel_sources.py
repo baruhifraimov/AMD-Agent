@@ -23,8 +23,6 @@ def _table_exists(conn: sqlite3.Connection, table_name: str) -> bool:
 def _disable_reason(row: dict[str, Any]) -> str:
     url = str(row.get("url") or "")
     source_type = str(row.get("source_type") or "rss")
-    if source_type == "threatingestor":
-        return ""
     if source_type != "rss":
         return f"non-rss:{source_type}"
     if is_low_signal_cti_url(url):

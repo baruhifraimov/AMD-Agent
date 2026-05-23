@@ -23,7 +23,11 @@ def choose_provider(
     tracker = tracker or db.get_tracker()
     ctx = build_collection_context(tracker)
     selection = CollectionStrategyFactory.create(ctx).select(ctx)
-    provider = registry.get(selection.source_type)
+    if selection.expected_label == -1:
+        # Legacy API returns one provider; mixed graph runs use source_selector instead.
+        provider = choose_benign_provider(registry, tracker)
+    else:
+        provider = registry.get(selection.source_type)
     counts = tracker.count_by_label()
     logger.info(
         "Source selector: %s phase=%s malware=%d benign=%d",

@@ -8,6 +8,7 @@ from src.collection.context import (
 from src.collection.discovery_chain import (
     discover_active_benign_sources,
     discover_active_malware_sources,
+    discover_mixed_sources,
     discover_with_fallback,
 )
 from src.collection.factory import CollectionStrategyFactory
@@ -19,5 +20,6 @@ __all__ = [
     "current_collection_phase",
     "discover_active_benign_sources",
     "discover_active_malware_sources",
+    "discover_mixed_sources",
     "discover_with_fallback",
 ]

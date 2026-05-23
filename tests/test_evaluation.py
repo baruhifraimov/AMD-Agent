@@ -82,6 +82,32 @@ def test_run_tesseract_eval_skips_single_class_temporal_tail(
     mock_fit.assert_not_called()
 
 
+def test_training_order_uses_ingested_at_not_source_first_seen(tmp_paths):
+    tracker = tmp_paths["tracker"]
+    benign_sha = "b" * 64
+    malware_sha = "c" * 64
+    tracker.insert_sample(
+        malware_sha,
+        f"/tmp/{malware_sha}.bin",
+        "2020-01-01 00:00:00",
+        features=_features(1.0),
+        label=1,
+        ingested_at="2024-01-02 00:00:00",
+        source_first_seen="2020-01-01 00:00:00",
+    )
+    tracker.insert_sample(
+        benign_sha,
+        f"/tmp/{benign_sha}.bin",
+        "2024-01-01 00:00:00",
+        features=_features(0.0),
+        label=0,
+        ingested_at="2024-01-01 00:00:00",
+    )
+
+    rows = tracker.fetch_labeled_with_features()
+    assert [row["sha256"] for row in rows] == [benign_sha, malware_sha]
+
+
 def test_plot_performance_decay_uses_figures_dir(tmp_paths):
     append_eval_log({"accuracy": 0.9, "fpr": 0.01})
     out_path = plot_performance_decay()

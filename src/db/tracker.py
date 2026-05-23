@@ -27,9 +27,12 @@ CREATE TABLE IF NOT EXISTS samples (
     source_provider TEXT,
     source_url TEXT,
     feature_version TEXT,
-    feature_dim INTEGER
+    feature_dim INTEGER,
+    ingested_at TEXT,
+    source_first_seen TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_samples_acquired ON samples(acquired_at);
+CREATE INDEX IF NOT EXISTS idx_samples_ingested ON samples(ingested_at);
 CREATE INDEX IF NOT EXISTS idx_samples_status ON samples(status);
 CREATE INDEX IF NOT EXISTS idx_samples_source_url ON samples(source_url);
 CREATE INDEX IF NOT EXISTS idx_samples_feature_version ON samples(feature_version);
@@ -50,6 +53,46 @@ CREATE TABLE IF NOT EXISTS sample_sources (
     first_seen_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_sample_sources_sha256 ON sample_sources(sha256);
+CREATE TABLE IF NOT EXISTS provider_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    provider TEXT NOT NULL,
+    label INTEGER,
+    phase TEXT,
+    stage TEXT,
+    requested INTEGER NOT NULL DEFAULT 0,
+    discovered INTEGER NOT NULL DEFAULT 0,
+    fresh INTEGER NOT NULL DEFAULT 0,
+    returned INTEGER NOT NULL DEFAULT 0,
+    download_attempted INTEGER NOT NULL DEFAULT 0,
+    downloaded INTEGER NOT NULL DEFAULT 0,
+    duplicate INTEGER NOT NULL DEFAULT 0,
+    non_pe INTEGER NOT NULL DEFAULT 0,
+    valid_pe INTEGER NOT NULL DEFAULT 0,
+    feature_extracted INTEGER NOT NULL DEFAULT 0,
+    failed INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_provider_runs_provider_label ON provider_runs(provider, label, created_at);
+CREATE TABLE IF NOT EXISTS candidates (
+    candidate_key TEXT PRIMARY KEY,
+    provider TEXT NOT NULL,
+    label INTEGER,
+    external_id TEXT,
+    sha256 TEXT,
+    source_url TEXT,
+    status TEXT NOT NULL,
+    attempts INTEGER NOT NULL DEFAULT 0,
+    first_seen_at TEXT NOT NULL,
+    last_seen_at TEXT NOT NULL,
+    last_error TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_candidates_provider ON candidates(provider, label, status);
+CREATE INDEX IF NOT EXISTS idx_candidates_sha256 ON candidates(sha256);
+CREATE TABLE IF NOT EXISTS collection_counters (
+    name TEXT PRIMARY KEY,
+    value INTEGER NOT NULL DEFAULT 0,
+    updated_at TEXT NOT NULL
+);
 """
 
 
@@ -99,6 +142,10 @@ class MalwareTracker:
             conn.execute("ALTER TABLE samples ADD COLUMN feature_version TEXT")
         if "feature_dim" not in columns:
             conn.execute("ALTER TABLE samples ADD COLUMN feature_dim INTEGER")
+        if "ingested_at" not in columns:
+            conn.execute("ALTER TABLE samples ADD COLUMN ingested_at TEXT")
+        if "source_first_seen" not in columns:
+            conn.execute("ALTER TABLE samples ADD COLUMN source_first_seen TEXT")
         conn.execute(
             """
             UPDATE samples
@@ -112,6 +159,14 @@ class MalwareTracker:
         conn.execute("CREATE INDEX IF NOT EXISTS idx_samples_status ON samples(status)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_samples_source_url ON samples(source_url)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_samples_feature_version ON samples(feature_version)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_samples_ingested ON samples(ingested_at)")
+        conn.execute(
+            """
+            UPDATE samples
+            SET ingested_at = acquired_at
+            WHERE ingested_at IS NULL OR ingested_at = ''
+            """
+        )
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS sample_sources (
@@ -130,6 +185,51 @@ class MalwareTracker:
             SELECT source_url, sha256, source_provider, acquired_at
             FROM samples
             WHERE source_url IS NOT NULL AND source_url != ''
+            """
+        )
+        conn.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS provider_runs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                provider TEXT NOT NULL,
+                label INTEGER,
+                phase TEXT,
+                stage TEXT,
+                requested INTEGER NOT NULL DEFAULT 0,
+                discovered INTEGER NOT NULL DEFAULT 0,
+                fresh INTEGER NOT NULL DEFAULT 0,
+                returned INTEGER NOT NULL DEFAULT 0,
+                download_attempted INTEGER NOT NULL DEFAULT 0,
+                downloaded INTEGER NOT NULL DEFAULT 0,
+                duplicate INTEGER NOT NULL DEFAULT 0,
+                non_pe INTEGER NOT NULL DEFAULT 0,
+                valid_pe INTEGER NOT NULL DEFAULT 0,
+                feature_extracted INTEGER NOT NULL DEFAULT 0,
+                failed INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_provider_runs_provider_label
+                ON provider_runs(provider, label, created_at);
+            CREATE TABLE IF NOT EXISTS candidates (
+                candidate_key TEXT PRIMARY KEY,
+                provider TEXT NOT NULL,
+                label INTEGER,
+                external_id TEXT,
+                sha256 TEXT,
+                source_url TEXT,
+                status TEXT NOT NULL,
+                attempts INTEGER NOT NULL DEFAULT 0,
+                first_seen_at TEXT NOT NULL,
+                last_seen_at TEXT NOT NULL,
+                last_error TEXT
+            );
+            CREATE INDEX IF NOT EXISTS idx_candidates_provider ON candidates(provider, label, status);
+            CREATE INDEX IF NOT EXISTS idx_candidates_sha256 ON candidates(sha256);
+            CREATE TABLE IF NOT EXISTS collection_counters (
+                name TEXT PRIMARY KEY,
+                value INTEGER NOT NULL DEFAULT 0,
+                updated_at TEXT NOT NULL
+            );
             """
         )
 
@@ -156,7 +256,7 @@ class MalwareTracker:
         return row is not None
 
     def is_pending(self, sha256: str) -> bool:
-        """True when row exists but file_path is empty (ThreatIngestor queue)."""
+        """True when row exists but file_path is empty (pending malware queue)."""
         with self._connect() as conn:
             row = conn.execute(
                 """
@@ -232,7 +332,7 @@ class MalwareTracker:
             )
 
     def fetch_pending_hashes(self, limit: int = 10) -> list[dict[str, Any]]:
-        """Hashes from ThreatIngestor not yet downloaded (oldest first)."""
+        """Hashes not yet downloaded (oldest first)."""
         with self._connect() as conn:
             rows = conn.execute(
                 """
@@ -256,30 +356,66 @@ class MalwareTracker:
         acquired_at: str | None = None,
         *,
         label: int = 1,
+        source_first_seen: str | None = None,
     ) -> None:
-        """Insert a ThreatIngestor hash awaiting download (no overwrite if exists)."""
-        acquired = acquired_at or self.utc_now_iso()
+        """Insert a malware hash awaiting download (no overwrite if exists)."""
+        ingested = self.utc_now_iso()
+        acquired = acquired_at or ingested
+        source_seen = source_first_seen or acquired_at
         with self._connect() as conn:
             conn.execute(
                 """
                 INSERT OR IGNORE INTO samples
-                (sha256, file_path, acquired_at, features_json, label, prediction, anomaly_score, status)
-                VALUES (?, '', ?, NULL, ?, NULL, NULL, 'pending')
+                (sha256, file_path, acquired_at, features_json, label, prediction, anomaly_score, status, ingested_at, source_first_seen)
+                VALUES (?, '', ?, NULL, ?, NULL, NULL, 'pending', ?, ?)
                 """,
-                (sha256.lower(), acquired, label),
+                (sha256.lower(), acquired, label, ingested, source_seen),
             )
 
-    def update_file_path(self, sha256: str, file_path: str) -> None:
+    def update_file_path(
+        self,
+        sha256: str,
+        file_path: str,
+        *,
+        source_provider: str | None = None,
+        source_url: str | None = None,
+        ingested_at: str | None = None,
+        source_first_seen: str | None = None,
+    ) -> None:
         """Set sandbox path after download for a pending row."""
+        ingested = ingested_at or self.utc_now_iso()
         with self._connect() as conn:
             conn.execute(
                 """
                 UPDATE samples
-                SET file_path = ?, status = 'active', reject_reason = NULL, rejected_at = NULL
+                SET file_path = ?,
+                    status = 'active',
+                    reject_reason = NULL,
+                    rejected_at = NULL,
+                    source_provider = COALESCE(NULLIF(source_provider, ''), ?),
+                    source_url = COALESCE(NULLIF(source_url, ''), ?),
+                    ingested_at = COALESCE(NULLIF(ingested_at, ''), ?),
+                    source_first_seen = COALESCE(NULLIF(source_first_seen, ''), ?)
                 WHERE sha256 = ?
                 """,
-                (file_path, sha256.lower()),
+                (
+                    file_path,
+                    source_provider,
+                    source_url,
+                    ingested,
+                    source_first_seen,
+                    sha256.lower(),
+                ),
             )
+            if source_url:
+                conn.execute(
+                    """
+                    INSERT OR IGNORE INTO sample_sources
+                    (source_url, sha256, source_provider, first_seen_at)
+                    VALUES (?, ?, ?, ?)
+                    """,
+                    (source_url, sha256.lower(), source_provider, ingested),
+                )
 
     def insert_sample(
         self,
@@ -296,16 +432,19 @@ class MalwareTracker:
         rejected_at: str | None = None,
         source_provider: str | None = None,
         source_url: str | None = None,
+        ingested_at: str | None = None,
+        source_first_seen: str | None = None,
     ) -> None:
         features_json = json.dumps(features) if features is not None else None
         feature_version = FEATURE_SET_VERSION if features is not None else None
         feature_dim = FEATURE_DIM if features is not None else None
+        ingested = ingested_at or acquired_at or self.utc_now_iso()
         with self._connect() as conn:
             conn.execute(
                 """
                 INSERT OR REPLACE INTO samples
-                (sha256, file_path, acquired_at, features_json, label, prediction, anomaly_score, status, reject_reason, rejected_at, source_provider, source_url, feature_version, feature_dim)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                (sha256, file_path, acquired_at, features_json, label, prediction, anomaly_score, status, reject_reason, rejected_at, source_provider, source_url, feature_version, feature_dim, ingested_at, source_first_seen)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     sha256.lower(),
@@ -322,6 +461,8 @@ class MalwareTracker:
                     source_url,
                     feature_version,
                     feature_dim,
+                    ingested,
+                    source_first_seen,
                 ),
             )
             if source_url:
@@ -342,10 +483,12 @@ class MalwareTracker:
         file_path: str | None = None,
         acquired_at: str | None = None,
         label: int | None = 1,
+        source_first_seen: str | None = None,
     ) -> None:
         """Mark a sample as rejected/corrupted so pending queues do not reprocess it."""
         sha = sha256.lower()
-        acquired = acquired_at or self.utc_now_iso()
+        ingested = self.utc_now_iso()
+        acquired = acquired_at or ingested
         rejected_at = self.utc_now_iso()
         with self._connect() as conn:
             row = conn.execute("SELECT 1 FROM samples WHERE sha256 = ?", (sha,)).fetchone()
@@ -353,10 +496,19 @@ class MalwareTracker:
                 conn.execute(
                     """
                     INSERT INTO samples
-                    (sha256, file_path, acquired_at, features_json, label, prediction, anomaly_score, status, reject_reason, rejected_at)
-                    VALUES (?, ?, ?, NULL, ?, NULL, NULL, 'corrupted', ?, ?)
+                    (sha256, file_path, acquired_at, features_json, label, prediction, anomaly_score, status, reject_reason, rejected_at, ingested_at, source_first_seen)
+                    VALUES (?, ?, ?, NULL, ?, NULL, NULL, 'corrupted', ?, ?, ?, ?)
                     """,
-                    (sha, file_path or "", acquired, label, reason, rejected_at),
+                    (
+                        sha,
+                        file_path or "",
+                        acquired,
+                        label,
+                        reason,
+                        rejected_at,
+                        ingested,
+                        source_first_seen or acquired_at,
+                    ),
                 )
             else:
                 conn.execute(
@@ -365,13 +517,24 @@ class MalwareTracker:
                     SET status = 'corrupted',
                         reject_reason = ?,
                         rejected_at = ?,
+                        ingested_at = COALESCE(NULLIF(ingested_at, ''), ?),
+                        source_first_seen = COALESCE(NULLIF(source_first_seen, ''), ?),
                         file_path = CASE
                             WHEN ? IS NOT NULL AND ? != '' THEN ?
                             ELSE file_path
                         END
                     WHERE sha256 = ?
                     """,
-                    (reason, rejected_at, file_path, file_path, file_path, sha),
+                    (
+                        reason,
+                        rejected_at,
+                        ingested,
+                        source_first_seen or acquired_at,
+                        file_path,
+                        file_path,
+                        file_path,
+                        sha,
+                    ),
                 )
 
     def update_features(self, sha256: str, features: dict[str, Any]) -> None:
@@ -414,7 +577,7 @@ class MalwareTracker:
     def fetch_chronological(self) -> list[dict[str, Any]]:
         with self._connect() as conn:
             rows = conn.execute(
-                "SELECT * FROM samples ORDER BY acquired_at ASC"
+                "SELECT * FROM samples ORDER BY COALESCE(NULLIF(ingested_at, ''), acquired_at) ASC"
             ).fetchall()
         return [self._row_to_dict(r) for r in rows]
 
@@ -428,7 +591,7 @@ class MalwareTracker:
                   AND file_path IS NOT NULL
                   AND file_path != ''
                   AND COALESCE(status, 'active') = 'active'
-                ORDER BY acquired_at ASC
+                ORDER BY COALESCE(NULLIF(ingested_at, ''), acquired_at) ASC
                 """
             ).fetchall()
         return [self._row_to_dict(r) for r in rows]
@@ -451,12 +614,300 @@ class MalwareTracker:
             ).fetchall()
         return {int(r["label"]): int(r["cnt"]) for r in rows}
 
+    def record_provider_run(
+        self,
+        *,
+        provider: str,
+        label: int | None,
+        phase: str = "",
+        stage: str = "",
+        requested: int = 0,
+        discovered: int = 0,
+        fresh: int = 0,
+        returned: int = 0,
+        download_attempted: int = 0,
+        downloaded: int = 0,
+        duplicate: int = 0,
+        non_pe: int = 0,
+        valid_pe: int = 0,
+        feature_extracted: int = 0,
+        failed: int = 0,
+    ) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO provider_runs
+                (provider, label, phase, stage, requested, discovered, fresh, returned,
+                 download_attempted, downloaded, duplicate, non_pe, valid_pe,
+                 feature_extracted, failed, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    provider,
+                    label,
+                    phase,
+                    stage,
+                    requested,
+                    discovered,
+                    fresh,
+                    returned,
+                    download_attempted,
+                    downloaded,
+                    duplicate,
+                    non_pe,
+                    valid_pe,
+                    feature_extracted,
+                    failed,
+                    self.utc_now_iso(),
+                ),
+            )
+
+    def provider_recent_stats(
+        self,
+        provider: str,
+        label: int | None,
+        *,
+        window: int = 10,
+    ) -> dict[str, int]:
+        label_sql = "label IS NULL" if label is None else "label = ?"
+        params: tuple[Any, ...] = (provider, window) if label is None else (provider, label, window)
+        with self._connect() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT * FROM provider_runs
+                WHERE provider = ? AND {label_sql}
+                ORDER BY id DESC
+                LIMIT ?
+                """,
+                params,
+            ).fetchall()
+        keys = (
+            "requested",
+            "discovered",
+            "fresh",
+            "returned",
+            "download_attempted",
+            "downloaded",
+            "duplicate",
+            "non_pe",
+            "valid_pe",
+            "feature_extracted",
+            "failed",
+        )
+        out = {key: 0 for key in keys}
+        out["runs"] = len(rows)
+        for row in rows:
+            for key in keys:
+                out[key] += int(row[key] or 0)
+        return out
+
+    def provider_success_rate(self, provider: str, label: int | None, *, window: int = 10) -> float | None:
+        stats = self.provider_recent_stats(provider, label, window=window)
+        if stats["runs"] == 0:
+            return None
+        attempts = max(
+            int(stats.get("download_attempted", 0)),
+            int(stats.get("returned", 0)),
+            int(stats.get("discovered", 0)),
+        )
+        if attempts <= 0:
+            return 0.0
+        return float(stats.get("feature_extracted", 0)) / float(attempts)
+
+    def is_provider_cooled_down(self, provider: str, label: int | None) -> bool:
+        needed = config.PROVIDER_COOLDOWN_ZERO_RUNS
+        label_sql = "label IS NULL" if label is None else "label = ?"
+        params: tuple[Any, ...] = (provider, needed) if label is None else (provider, label, needed)
+        with self._connect() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT * FROM provider_runs
+                WHERE provider = ? AND {label_sql}
+                ORDER BY id DESC
+                LIMIT ?
+                """,
+                params,
+            ).fetchall()
+        if len(rows) < needed:
+            return False
+        last = self._parse_utc(str(rows[0]["created_at"]))
+        if last is None:
+            return False
+        age = (datetime.now(timezone.utc) - last).total_seconds()
+        if age > config.PROVIDER_COOLDOWN_SECONDS:
+            return False
+        for row in rows:
+            activity = max(
+                int(row["requested"] or 0),
+                int(row["discovered"] or 0),
+                int(row["returned"] or 0),
+                int(row["download_attempted"] or 0),
+            )
+            if activity < config.PROVIDER_COOLDOWN_MIN_ATTEMPTS:
+                return False
+            if int(row["feature_extracted"] or 0) > 0:
+                return False
+        return True
+
+    def rank_providers_by_yield(self, providers: list[str], label: int) -> list[str]:
+        indexed = list(dict.fromkeys(providers))
+
+        def score(name: str) -> tuple[int, float, int]:
+            cooled = self.is_provider_cooled_down(name, label)
+            rate = self.provider_success_rate(name, label)
+            return (1 if cooled else 0, -(0.5 if rate is None else rate), indexed.index(name))
+
+        return sorted(indexed, key=score)
+
+    def record_candidate_seen(
+        self,
+        *,
+        candidate_key: str,
+        provider: str,
+        label: int | None,
+        external_id: str = "",
+        sha256: str = "",
+        source_url: str = "",
+        status: str = "seen",
+    ) -> None:
+        if not candidate_key or not provider:
+            return
+        now = self.utc_now_iso()
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO candidates
+                (candidate_key, provider, label, external_id, sha256, source_url, status,
+                 attempts, first_seen_at, last_seen_at, last_error)
+                VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, NULL)
+                ON CONFLICT(candidate_key) DO UPDATE SET
+                    provider = excluded.provider,
+                    label = excluded.label,
+                    external_id = COALESCE(NULLIF(excluded.external_id, ''), candidates.external_id),
+                    sha256 = COALESCE(NULLIF(excluded.sha256, ''), candidates.sha256),
+                    source_url = COALESCE(NULLIF(excluded.source_url, ''), candidates.source_url),
+                    status = excluded.status,
+                    last_seen_at = excluded.last_seen_at
+                """,
+                (
+                    candidate_key,
+                    provider,
+                    label,
+                    external_id,
+                    sha256,
+                    source_url,
+                    status,
+                    now,
+                    now,
+                ),
+            )
+
+    def record_candidate_outcome(
+        self,
+        candidate_key: str,
+        *,
+        status: str,
+        error: str | None = None,
+        sha256: str | None = None,
+        increment_attempts: bool = False,
+    ) -> None:
+        if not candidate_key:
+            return
+        now = self.utc_now_iso()
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO candidates
+                (candidate_key, provider, status, attempts, first_seen_at, last_seen_at, last_error, sha256)
+                VALUES (?, 'unknown', ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(candidate_key) DO UPDATE SET
+                    status = excluded.status,
+                    attempts = candidates.attempts + ?,
+                    last_seen_at = excluded.last_seen_at,
+                    last_error = excluded.last_error,
+                    sha256 = COALESCE(NULLIF(excluded.sha256, ''), candidates.sha256)
+                """,
+                (
+                    candidate_key,
+                    status,
+                    1 if increment_attempts else 0,
+                    now,
+                    now,
+                    error,
+                    sha256 or "",
+                    1 if increment_attempts else 0,
+                ),
+            )
+
+    def increment_collection_counter(self, name: str) -> int:
+        now = self.utc_now_iso()
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO collection_counters (name, value, updated_at)
+                VALUES (?, 1, ?)
+                ON CONFLICT(name) DO UPDATE SET
+                    value = value + 1,
+                    updated_at = excluded.updated_at
+                """,
+                (name, now),
+            )
+            row = conn.execute(
+                "SELECT value FROM collection_counters WHERE name = ?",
+                (name,),
+            ).fetchone()
+        return int(row["value"]) if row else 1
+
+    def temporal_split_health(
+        self,
+        *,
+        train_ratio: float = 0.7,
+        val_ratio: float = 0.15,
+    ) -> dict[str, Any]:
+        rows = self.fetch_labeled_with_features()
+        labels = [int(row["label"]) for row in rows if row.get("label") in (0, 1)]
+        n = len(labels)
+        if n < 5:
+            return {"healthy": False, "support": n, "reason": "insufficient"}
+        train_end = int(n * train_ratio)
+        val_end = int(n * (train_ratio + val_ratio))
+        splits = {
+            "train": labels[:train_end],
+            "val": labels[train_end:val_end],
+            "test": labels[val_end:],
+        }
+        out: dict[str, Any] = {"support": n}
+        healthy = True
+        for name, values in splits.items():
+            counts = {0: values.count(0), 1: values.count(1)}
+            out[f"{name}_benign"] = counts[0]
+            out[f"{name}_malware"] = counts[1]
+            if counts[0] == 0 or counts[1] == 0:
+                healthy = False
+        out["healthy"] = healthy
+        if not healthy:
+            out["reason"] = "single_class_split"
+        return out
+
     @staticmethod
     def _row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
         d = dict(row)
         if d.get("features_json"):
             d["features"] = json.loads(d["features_json"])
         return d
+
+    @staticmethod
+    def _parse_utc(value: str) -> datetime | None:
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            try:
+                parsed = datetime.strptime(value, "%Y-%m-%d %H:%M:%S")
+            except ValueError:
+                return None
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc)
 
     @staticmethod
     def utc_now_iso() -> str:
