@@ -46,9 +46,9 @@ Table~\ref{tab:provenance} separates dynamic collection from fixed configuration
 \toprule
 \textbf{Dynamic (runtime)} & \textbf{Hardcoded / curated} \\
 \midrule
-MalwareBazaar / ThreatFox API discovery & Bootstrap malware provider pin (MalwareBazaar) \\
-Dynamic CTI feed discovery (web search) & Curated native CTI seed list \\
-Dynamic CTI hash extraction from public pages & \texttt{GITHUB\_BENIGN\_REPOS} allowlist \\
+MalwareBazaar / ThreatFox / OTX pulse API discovery & Bootstrap malware provider pin (MalwareBazaar) \\
+OTX pulse hash evidence + structured LLM verdicts & Curated native CTI seed list \\
+Curated CTI hash extraction from allowlisted feeds & \texttt{GITHUB\_BENIGN\_REPOS} allowlist \\
 Sysinternals directory scrape & CTI download domain allowlist \\
 SQLite tracker labels from provider metadata & Optional \texttt{data/benign/} if env enabled \\
 \bottomrule

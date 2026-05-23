@@ -43,6 +43,7 @@ class OTXApiClient(HttpApiClient):
         try:
             response = self.get(
                 {"modified_since": modified_since, "limit": min(limit, 50)},
+                endpoint="pulses/subscribed",
                 timeout=30.0,
             )
             payload = response.json()

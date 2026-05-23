@@ -55,7 +55,7 @@ def test_route_after_selector(mock_ctx):
 
 
 @patch("src.graph.PE_SOURCE_DISCOVERY_ENABLED", False)
-def test_route_after_selector_pe_discovery_disabled(_mock_pe):
+def test_route_after_selector_pe_discovery_disabled():
     from src.collection.context import CollectionContext
 
     with patch("src.graph.build_collection_context") as mock_ctx:
@@ -76,7 +76,7 @@ def test_route_after_selector_pe_discovery_disabled(_mock_pe):
 
 @patch("src.graph.PE_SOURCE_DISCOVERY_ENABLED", True)
 @patch("src.graph.PESourceStore")
-def test_route_pe_source_discovery_when_sparse(mock_store, _mock_enabled):
+def test_route_pe_source_discovery_when_sparse(mock_store):
     mock_store.return_value.count_active.return_value = 0
     with patch("src.graph.build_collection_context") as mock_ctx:
         from src.collection.context import CollectionContext
@@ -134,7 +134,6 @@ def test_graph_malware_source_discovery_path(
         "discovery_strategy": "steady_malware_active",
         "collection_phase": "steady",
         "route_hint": "source_discovery",
-        "cti_queries": [],
         "sample_candidates": [],
         "discovered_hashes": [],
         "downloaded_paths": [],

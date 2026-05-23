@@ -1,4 +1,4 @@
-"""ThreatIntelCollector — discover, poll, validate, and queue malware IOCs."""
+"""ThreatIntelCollector — poll, filter, validate, and queue malware IOCs."""
 
 from __future__ import annotations
 

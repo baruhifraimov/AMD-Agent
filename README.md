@@ -52,13 +52,13 @@ are treated as stale and retrained.
   - active malware collection alongside MalwareBazaar during bootstrap and steady volume fill,
   - fallback when MalwareBazaar circuit/quota blocks (`MB_FALLBACK_MALSHARE = True` in `config.py`).
 
-- Dynamic CTI discovery:
-  - configurable `ddgs` backends and optional Brave Search API,
-  - public CTI page fetching with strict byte truncation,
-  - SHA256 extraction with surrounding evidence,
-  - semantic hash filtering through Ollama when available.
+- AlienVault OTX pulse CTI (`otx_pulse_cti`):
+  - live pulse retrieval through `src/tools/clients/otx_api_client.py`,
+  - SHA256 indicator extraction from OTX pulse indicators,
+  - pulse names, descriptions, references, tags, and indicator text combined into `raw_text`,
+  - structured semantic hash filtering through Ollama when available.
 
-Dynamic CTI uses a Hybrid Strict policy: CTI pages are used only as evidence for hashes. Arbitrary CTI URLs are not used for binary download.
+OTX and curated CTI feeds use a Hybrid Strict policy: CTI text is used only as evidence for hashes. Arbitrary CTI URLs are not used for binary download.
 
 ### Benign
 
@@ -107,7 +107,7 @@ Dynamic CTI uses a Hybrid Strict policy: CTI pages are used only as evidence for
 | `ingested_at` | local ingestion timestamp used for TESSERACT chronological order |
 | `source_first_seen` | provider-side first-seen timestamp, when available |
 
-Dynamic CTI fallback can validate hashes and load pending malware rows where `file_path=''` and `status` is `pending` or `active`. Rows marked `corrupted` are not retried.
+OTX and curated CTI fallback can validate hashes and load pending malware rows where `file_path=''` and `status` is `pending` or `active`. Rows marked `corrupted` are not retried.
 
 `provider_runs` stores recent provider yield metrics and drives cooldowns.
 `candidates` stores provider refs/status/attempts without storing PE bytes.
@@ -117,7 +117,8 @@ Dynamic CTI fallback can validate hashes and load pending malware rows where `fi
 - Python 3.12.
 - Docker Desktop for container execution.
 - MalwareBazaar API key.
-- Ollama running locally for LLM decisions/reports.
+- AlienVault OTX API key when `otx_pulse_cti` is enabled.
+- Ollama running locally for source choice, structured CTI parsing, and drift reports.
 - capa rules directory:
   - Docker build clones official `capa-rules` into `/opt/capa-rules`.
   - Local runs need `CAPA_RULES_DIR` in `src/config.py` pointing to a valid rules directory.
@@ -133,7 +134,7 @@ Installed dependencies include:
 
 - `langgraph`, `pydantic`
 - `langchain-ollama`, `langchain-core`
-- `httpx`, `beautifulsoup4`, `ddgs`
+- `httpx`, `beautifulsoup4`, `OTXv2`
 - `pefile`, `pyzipper`, `flare-capa`
 - `river`, `lightgbm`, `scikit-learn`
 - `xgboost`, `optuna`, `capstone`
@@ -190,13 +191,13 @@ Optional secrets and endpoints (see [`.env.example`](.env.example)):
 |---|---|
 | `GITHUB_TOKEN` | GitHub API rate limits for benign release discovery |
 | `MALSHARE_API_KEY` | MalShare malware API (enable with `MALSHARE_ENABLED` in `config.py`) |
-| `AMD_BRAVE_SEARCH_API_KEY` | Brave Search for CTI page discovery |
+| `OTX_API_KEY` | AlienVault OTX pulse CTI |
 | `AMD_OLLAMA_BASE_URL` | Ollama HTTP endpoint |
 | `AMD_OLLAMA_MODEL` | Ollama model tag (e.g. `llama3.1:8b`) |
 
 **All other tuning** (scheduler interval, bootstrap limits, drift/ADWIN, MalwareBazaar throttles, provider cooldowns, feature flags such as `ALLOW_LOCAL_BENIGN`, `PE_SOURCE_DISCOVERY_ENABLED`, `FORCED_BENIGN_PROVIDER`, capa rules path for local dev, etc.) lives in [`src/config.py`](src/config.py). Edit constants there instead of `.env`.
 
-Legacy `AMD_*` keys in an existing `.env` are ignored after this change; prune them when convenient.
+Legacy search keys in an existing `.env` are ignored after this change; prune them when convenient.
 
 ## Docker Run
 
@@ -288,21 +289,23 @@ git clone https://github.com/mandiant/capa-rules.git C:\capa-rules
 
 Steady malware collection goes directly through active source discovery:
 MalwareBazaar plus MalShare when enabled. If those sources under-fill the batch,
-the configured fallback chain can include `threatfox` and `dynamic_cti`.
+the configured fallback chain is `malshare`, `threatfox`, then `otx_pulse_cti`.
 
-`dynamic_cti` uses the native collector to seed high-signal public CTI feeds
-(DFIR Report, Cisco Talos, Google Threat Intelligence, CISA advisories, Unit42,
-Securelist, and Malwarebytes) before falling back to web-search source discovery.
-Search results from academic/paywalled hosts are ignored because they rarely
-produce actionable PE SHA256 indicators.
+`otx_pulse_cti` retrieves recent AlienVault OTX pulses, extracts structured
+SHA256 indicators, sends the pulse `raw_text` to Ollama for structured semantic
+filtering, and validates accepted hashes with MalwareBazaar before queuing or
+downloading samples. The local Ollama integration is a parser/verdict layer here,
+not a source-discovery or search agent.
 
 | Capability | Implementation |
 |---|---|
 | Curated CTI feeds | `src/intel/seed_sources.py` for in-process polling |
-| Dynamic source discovery | Web search + LLM → `intel_sources` (native `feedparser` polls) |
+| Live OTX pulse provider | `src/sources/otx_pulse_cti.py` + `src/tools/clients/otx_api_client.py` |
+| Structured hash verdicts | `src/llm/client.py`: `SemanticHashVerdict`, `semantic_filter_hashes` |
+| Confidence gating | `SEMANTIC_MIN_CONFIDENCE`, `SEMANTIC_REQUIRE_TECHNICAL_REPORT` in `src/config.py` |
 | Upstream validation | SHA256 + MalwareBazaar `is_pe_hash` before pending insert |
-| Multi-provider download | `src/tools/pe_download.py`: MB (retry) → allowlisted URL |
-| LangGraph tools | `discover_intel_sources`, `poll_intel_feeds`, `validate_and_queue_candidates` |
+| Multi-provider download | `src/tools/pe_download.py`: MB (retry) -> allowlisted URL |
+| LangGraph tools | `poll_intel_feeds`, `validate_and_queue_candidates` |
 
 Run the agent:
 
@@ -310,9 +313,12 @@ Run the agent:
 docker compose up --force-recreate
 ```
 
-| Env var | Purpose |
+| Setting | Purpose |
 |---|---|
-| `CTI_SEED_SOURCES_ENABLED` | Keep curated CTI feeds enabled in the native source registry (`config.py`) |
+| `OTX_API_KEY` | Required in `.env` for live OTX pulse ingestion |
+| `OTX_ENABLED` | Enable/disable OTX provider in `src/config.py` |
+| `OTX_PULSE_DAYS` / `OTX_PULSE_LIMIT` | OTX pulse lookback and API result cap in `src/config.py` |
+| `CTI_SEED_SOURCES_ENABLED` | Keep curated CTI feeds enabled in the native source registry (`src/config.py`) |
 
 Pending row contract:
 
@@ -476,4 +482,4 @@ WAL mode is enabled. If locks persist, ensure no long-lived manual SQLite shell 
 - Use a VM or Docker.
 - Treat `data/sandbox` as malicious.
 - Keep MalwareBazaar and GitHub tokens private.
-- Respect source rate limits; Dynamic CTI includes query jitter and page-size truncation.
+- Respect source rate limits; MalwareBazaar, ThreatFox, MalShare, and OTX clients include throttling/circuit handling.

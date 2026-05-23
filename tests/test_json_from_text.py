@@ -54,6 +54,7 @@ def test_nested_json_extraction():
 
 
 def test_empty_input_returns_none():
+    assert _json_from_text(None) is None
     assert _json_from_text("") is None
     assert _json_from_text("   ") is None
 

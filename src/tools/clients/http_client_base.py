@@ -189,14 +189,16 @@ class HttpApiClient:
         self,
         params: dict[str, Any],
         *,
+        endpoint: str = "",
         timeout: float = 60.0,
     ) -> httpx.Response:
         """GET with throttle and circuit (no 429 retry loop by default)."""
         self._circuit.ensure_available()
         self._limiter.wait()
+        url = self.base_url + endpoint.lstrip("/") if endpoint else self.base_url
         try:
             with httpx.Client(timeout=timeout) as client:
-                response = client.get(self.base_url, params=params, headers=self.headers)
+                response = client.get(url, params=params, headers=self.headers)
             response.raise_for_status()
             self._circuit.record_success()
             return response
