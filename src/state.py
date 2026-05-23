@@ -12,6 +12,7 @@ class AgentState(BaseModel):
     feature_errors: Dict[str, str] = Field(default_factory=dict)
     predictions: Dict[str, float] = Field(default_factory=dict)
     drift_detected: bool = False
+    threshold_retrain: bool = False
     new_labeled_batch: List[Dict[str, Any]] = Field(default_factory=list)
     evaluation_metrics: Dict[str, float] = Field(default_factory=dict)
     semantic_report: Optional[str] = None

@@ -167,6 +167,8 @@ class MalwareTracker:
             conn.execute("ALTER TABLE samples ADD COLUMN malware_family TEXT")
         if "task_id" not in columns:
             conn.execute("ALTER TABLE samples ADD COLUMN task_id INTEGER")
+        if "trained_at" not in columns:
+            conn.execute("ALTER TABLE samples ADD COLUMN trained_at TEXT")
         conn.execute(
             """
             UPDATE samples
@@ -679,16 +681,22 @@ class MalwareTracker:
             row = conn.execute("SELECT MAX(task_id) as max_id FROM task_log").fetchone()
         return int(row["max_id"]) if row and row["max_id"] is not None else 0
 
-    def create_task(self, trigger: str, sample_count: int) -> int:
+    def create_task(
+        self,
+        trigger: str,
+        sample_count: int,
+        *,
+        model_version: str = "",
+    ) -> int:
         """Create a new chronological task and return its ID."""
         now = self.utc_now_iso()
         with self._connect() as conn:
             cursor = conn.execute(
                 """
-                INSERT INTO task_log (created_at, sample_count, trigger)
-                VALUES (?, ?, ?)
+                INSERT INTO task_log (created_at, sample_count, trigger, model_version)
+                VALUES (?, ?, ?, ?)
                 """,
-                (now, sample_count, trigger),
+                (now, sample_count, trigger, model_version or None),
             )
             return cursor.lastrowid or 0
 
@@ -699,6 +707,58 @@ class MalwareTracker:
                 "UPDATE samples SET task_id = ? WHERE sha256 = ?",
                 (task_id, sha256.lower()),
             )
+
+    def count_untrained_with_features(self) -> int:
+        """Count active labeled samples with features that have never been trained on."""
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT COUNT(*) as cnt FROM samples
+                WHERE trained_at IS NULL
+                  AND features_json IS NOT NULL
+                  AND status = 'active'
+                  AND label IS NOT NULL
+                  AND file_path IS NOT NULL
+                  AND file_path != ''
+                """
+            ).fetchone()
+        return int(row["cnt"]) if row else 0
+
+    def fetch_untrained_with_features(self) -> list[dict[str, Any]]:
+        """Fetch active labeled samples with features that have never been trained on."""
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT * FROM samples
+                WHERE trained_at IS NULL
+                  AND features_json IS NOT NULL
+                  AND status = 'active'
+                  AND label IS NOT NULL
+                  AND file_path IS NOT NULL
+                  AND file_path != ''
+                ORDER BY COALESCE(NULLIF(ingested_at, ''), acquired_at) ASC
+                """
+            ).fetchall()
+        return [self._row_to_dict(r) for r in rows]
+
+    def mark_all_trained(self, task_id: int | None = None) -> int:
+        """Mark all active labeled featured samples as trained. Returns count updated."""
+        now = self.utc_now_iso()
+        with self._connect() as conn:
+            conn.execute(
+                """
+                UPDATE samples SET trained_at = ?
+                WHERE trained_at IS NULL
+                  AND features_json IS NOT NULL
+                  AND status = 'active'
+                  AND label IS NOT NULL
+                  AND file_path IS NOT NULL
+                  AND file_path != ''
+                """,
+                (now,),
+            )
+            row = conn.execute("SELECT changes() as cnt").fetchone()
+        return int(row["cnt"]) if row else 0
 
     def get_all_task_ids(self) -> list[int]:
         """Return list of all task IDs ordered by creation time."""

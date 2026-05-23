@@ -55,8 +55,14 @@ def _wrap(node_fn):
     return inner
 
 
-def route_after_drift(state: AgentState) -> Literal["inference", "retrain"]:
-    return "retrain" if state.drift_detected else "inference"
+def route_after_drift(
+    state: AgentState,
+) -> Literal["inference", "retrain", "model_retrain"]:
+    if state.drift_detected:
+        return "retrain"
+    if state.threshold_retrain:
+        return "model_retrain"
+    return "inference"
 
 
 def route_after_selector(
@@ -134,6 +140,7 @@ def build_graph():
         {
             "inference": "classifier_inference",
             "retrain": "explain_drift_context",
+            "model_retrain": "model_retrain",
         },
     )
     graph.add_edge("classifier_inference", "evaluation")

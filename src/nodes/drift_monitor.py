@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import logging
 
+import src.db.tracker as db
 from src.collection.context import build_collection_context
+from src.config import THRESHOLD_RETRAIN_MIN_NEW_SAMPLES
 from src.ml.services import DriftMonitorService
 from src.state import AgentState
 
@@ -17,6 +19,7 @@ def drift_monitor(state: AgentState) -> dict:
         logger.info("Drift monitor skipped: collection phase is bootstrap")
         return {
             "drift_detected": False,
+            "threshold_retrain": False,
             "new_labeled_batch": [],
             "pending_drift_log": False,
             "drift_stats": {},
@@ -32,6 +35,7 @@ def drift_monitor(state: AgentState) -> dict:
 
     out: dict = {
         "drift_detected": drift_detected,
+        "threshold_retrain": False,
         "new_labeled_batch": labeled_batch,
         "drift_stats": drift_stats,
         "pending_drift_log": False,
@@ -49,5 +53,18 @@ def drift_monitor(state: AgentState) -> dict:
         out["drift_pre_metrics"] = latest_eval_metrics()
         out["pending_drift_log"] = True
         out["need_new_sources"] = True
+    else:
+        # Threshold-based retrain: accumulation of untrained features
+        tracker = db.get_tracker()
+        untrained_count = tracker.count_untrained_with_features()
+        if untrained_count >= THRESHOLD_RETRAIN_MIN_NEW_SAMPLES:
+            untrained_samples = tracker.fetch_untrained_with_features()
+            out["threshold_retrain"] = True
+            out["new_labeled_batch"] = untrained_samples
+            logger.info(
+                "Threshold retrain triggered: %d untrained samples >= threshold %d",
+                untrained_count,
+                THRESHOLD_RETRAIN_MIN_NEW_SAMPLES,
+            )
 
     return out
