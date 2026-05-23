@@ -27,7 +27,7 @@ class SourceRegistry:
 def build_default_registry() -> SourceRegistry:
     """Register providers lazily to avoid circular imports with src.intel.collector."""
     from src.sources.benign_net import BenignNetProvider
-    from src.sources.dynamic_cti import DynamicCTIProvider
+    from src.sources.otx_pulse_cti import OTXPulseCTIProvider
     from src.sources.github_releases import GitHubReleasesProvider
     from src.sources.malshare import MalShareProvider
     from src.sources.malwarebazaar import MalwareBazaarProvider
@@ -40,7 +40,7 @@ def build_default_registry() -> SourceRegistry:
     registry.register(MalShareProvider())
     registry.register(ThreatFoxProvider())
     registry.register(TwitterProvider())
-    registry.register(DynamicCTIProvider())
+    registry.register(OTXPulseCTIProvider())
     registry.register(SysinternalsProvider())
     registry.register(GitHubReleasesProvider())
     registry.register(BenignNetProvider())

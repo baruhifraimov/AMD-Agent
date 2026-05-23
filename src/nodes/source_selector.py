@@ -50,7 +50,6 @@ def source_selector(state: AgentState) -> dict:
         selected_sources = selection.selected_sources
         expected_label = selection.expected_label
         discovery_strategy = selection.discovery_strategy
-        cti_queries = selection.cti_queries
         collection_phase = selection.collection_phase
         route_hint = selection.route_hint
     else:
@@ -58,7 +57,6 @@ def source_selector(state: AgentState) -> dict:
         selected_sources = decision.selected_sources
         expected_label = decision.expected_label
         discovery_strategy = decision.discovery_strategy or "ollama"
-        cti_queries = decision.cti_queries
         collection_phase = selection.collection_phase
         route_hint = selection.route_hint
 
@@ -68,7 +66,6 @@ def source_selector(state: AgentState) -> dict:
         "discovery_strategy": discovery_strategy,
         "collection_phase": collection_phase,
         "route_hint": route_hint,
-        "cti_queries": cti_queries,
         "expected_label": expected_label,
         "sample_candidates": [],
         "discovered_hashes": [],

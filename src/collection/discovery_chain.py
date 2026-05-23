@@ -1,4 +1,4 @@
-"""Provider discovery with bootstrap malware fallback to dynamic_cti."""
+"""Provider discovery with bootstrap malware fallback chain."""
 
 from __future__ import annotations
 
@@ -102,24 +102,9 @@ def _discover_source_candidates(
     request_limit: int,
     registry: SourceRegistry,
     tracker: db.MalwareTracker,
-    cti_queries: list[str] | None = None,
 ) -> tuple[str, list[SampleCandidate]]:
-    provider_name = source_name
-    if source_name == "dynamic_cti":
-        provider_name = "dynamic_cti"
-        from src.intel.collector import ThreatIntelCollector
-
-        return (
-            provider_name,
-            ThreatIntelCollector(tracker=tracker).web_discover(
-                request_limit,
-                queries=cti_queries or None,
-            ),
-        )
-
     provider = registry.get(source_name)
-    provider_name = provider.name
-    return provider_name, provider.discover(request_limit)
+    return provider.name, provider.discover(request_limit)
 
 
 def discover_active_malware_sources(
@@ -129,7 +114,6 @@ def discover_active_malware_sources(
     tracker: db.MalwareTracker | None = None,
     ctx: CollectionContext | None = None,
     limit: int | None = None,
-    cti_queries: list[str] | None = None,
     stats: list[dict] | None = None,
     existing_candidates: list[SampleCandidate] | None = None,
 ) -> list[SampleCandidate]:
@@ -151,7 +135,7 @@ def discover_active_malware_sources(
             ctx=ctx,
             expected_label=1,
             limit=fetch_limit,
-            cti_queries=cti_queries,
+
             stats=stats,
         )
 
@@ -179,7 +163,7 @@ def discover_active_malware_sources(
                 request_limit=request_limit,
                 registry=registry,
                 tracker=tracker,
-                cti_queries=cti_queries,
+    
             )
         except Exception as exc:
             logger.warning("Discovery failed for provider=%s: %s", provider_name, exc)
@@ -230,7 +214,7 @@ def discover_active_malware_sources(
             ctx=ctx,
             expected_label=1,
             limit=fetch_limit - len(candidates),
-            cti_queries=cti_queries,
+
             stats=topup_stats,
         )
         _append_fresh_candidates(
@@ -383,7 +367,6 @@ def discover_mixed_sources(
     tracker: db.MalwareTracker | None = None,
     ctx: CollectionContext | None = None,
     limit: int | None = None,
-    cti_queries: list[str] | None = None,
     stats: list[dict] | None = None,
 ) -> list[SampleCandidate]:
     """Discover an interleaved malware/benign batch for temporal split health."""
@@ -410,7 +393,6 @@ def discover_mixed_sources(
         tracker=tracker,
         ctx=ctx,
         limit=malware_limit,
-        cti_queries=cti_queries,
         stats=malware_stats,
     )
     benign = discover_active_benign_sources(
@@ -446,7 +428,6 @@ def discover_with_fallback(
     ctx: CollectionContext | None = None,
     expected_label: int = 1,
     limit: int | None = None,
-    cti_queries: list[str] | None = None,
     stats: list[dict] | None = None,
 ) -> list[SampleCandidate]:
     """Discover from providers and keep filling malware batches via fallbacks."""
@@ -480,7 +461,7 @@ def discover_with_fallback(
                 request_limit=request_limit,
                 registry=registry,
                 tracker=tracker,
-                cti_queries=cti_queries,
+    
             )
         except Exception as exc:
             logger.warning("Discovery failed for provider=%s: %s", provider_name, exc)

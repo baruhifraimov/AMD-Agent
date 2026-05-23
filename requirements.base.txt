@@ -16,5 +16,4 @@ pytest>=8.0.0
 pytest-httpx>=0.30.0
 beautifulsoup4>=4.12.0
 pyyaml>=6.0.0
-ddgs>=9.0.0
 flare-capa>=8.0.0

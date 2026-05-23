@@ -8,3 +8,4 @@ regex>=2024.0.0
 xgboost>=2.0.0
 optuna>=3.6.0
 capstone>=5.0.0
+OTXv2>=1.5.12

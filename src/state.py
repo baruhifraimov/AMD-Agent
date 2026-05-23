@@ -21,7 +21,6 @@ class AgentState(BaseModel):
     collection_phase: str = ""
     route_hint: str = ""
     discovery_strategy: str = ""
-    cti_queries: List[str] = Field(default_factory=list)
     cti_evidence: Dict[str, Dict[str, Any]] = Field(default_factory=dict)
     expected_label: int = 1
     sample_candidates: List[Dict[str, Any]] = Field(default_factory=list)

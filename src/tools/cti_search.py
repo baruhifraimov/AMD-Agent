@@ -12,14 +12,11 @@ import httpx
 from bs4 import BeautifulSoup
 
 from src.config import (
-    BRAVE_SEARCH_API_KEY,
     CTI_HOST_BLOCK_SECONDS_403,
     CTI_HOST_BLOCK_SECONDS_429,
     CTI_HOST_BLOCK_SECONDS_TRANSPORT,
     CTI_PAGE_MAX_BYTES,
     CTI_REQUEST_TIMEOUT,
-    CTI_SEARCH_BACKENDS,
-    CTI_SEARCH_LIMIT,
 )
 
 logger = logging.getLogger(__name__)
@@ -31,9 +28,6 @@ PE_URL_RE = re.compile(
     r"https?://[^\s\"'<>]+\.(?:exe|dll|sys|scr|zip)(?:\?[^\s\"'<>]*)?",
     re.IGNORECASE,
 )
-BRAVE_SEARCH_URL = "https://api.search.brave.com/res/v1/web/search"
-
-
 def reset_host_blocklist() -> None:
     """Clear host blocklist (tests only)."""
     _host_blocklist.clear()
@@ -67,98 +61,6 @@ def _record_host_failure(url: str, status_code: int | None) -> None:
         ttl = CTI_HOST_BLOCK_SECONDS_TRANSPORT
     _host_blocklist[host] = time.monotonic() + ttl
     logger.info("CTI host blocklisted %s for %.0fs (status=%s)", host, ttl, status_code)
-
-
-def _ddgs_client():
-    try:
-        from ddgs import DDGS
-
-        return DDGS
-    except ImportError:
-        try:
-            from duckduckgo_search import DDGS
-
-            return DDGS
-        except Exception as exc:
-            logger.info("CTI search backend unavailable: %s", exc)
-            return None
-
-
-def web_search(query: str, limit: int = CTI_SEARCH_LIMIT) -> list[dict[str, str]]:
-    """Search public web pages. Returns normalized title/url/snippet rows."""
-    if BRAVE_SEARCH_API_KEY:
-        rows = _brave_search(query, limit=limit)
-        if rows:
-            return rows
-
-    DDGS = _ddgs_client()
-    if DDGS is None:
-        return []
-
-    rows: list[dict[str, str]] = []
-    try:
-        with DDGS() as ddgs:
-            try:
-                results = ddgs.text(
-                    query,
-                    max_results=limit,
-                    backend=CTI_SEARCH_BACKENDS,
-                )
-            except TypeError:
-                results = ddgs.text(query, max_results=limit)
-            for result in results:
-                url = str(result.get("href") or result.get("url") or "")
-                if not is_public_url(url):
-                    continue
-                rows.append(
-                    {
-                        "title": str(result.get("title") or ""),
-                        "url": url,
-                        "snippet": str(result.get("body") or ""),
-                    }
-                )
-    except Exception as exc:
-        logger.warning("CTI web search failed for %r: %s", query, exc)
-    return rows
-
-
-def _brave_search(query: str, limit: int = CTI_SEARCH_LIMIT) -> list[dict[str, str]]:
-    rows: list[dict[str, str]] = []
-    try:
-        with httpx.Client(timeout=CTI_REQUEST_TIMEOUT) as client:
-            response = client.get(
-                BRAVE_SEARCH_URL,
-                headers={
-                    "Accept": "application/json",
-                    "Accept-Encoding": "gzip",
-                    "X-Subscription-Token": BRAVE_SEARCH_API_KEY,
-                },
-                params={
-                    "q": query,
-                    "count": str(min(max(limit, 1), 20)),
-                    "search_lang": "en",
-                },
-            )
-            response.raise_for_status()
-            payload = response.json()
-    except Exception as exc:
-        logger.warning("Brave CTI web search failed for %r: %s", query, exc)
-        return []
-
-    for result in (payload.get("web") or {}).get("results") or []:
-        url = str(result.get("url") or "")
-        if not is_public_url(url):
-            continue
-        rows.append(
-            {
-                "title": str(result.get("title") or ""),
-                "url": url,
-                "snippet": str(result.get("description") or ""),
-            }
-        )
-        if len(rows) >= limit:
-            break
-    return rows
 
 
 def fetch_public_text(url: str) -> str:

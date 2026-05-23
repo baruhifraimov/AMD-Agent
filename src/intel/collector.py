@@ -11,9 +11,10 @@ from src.config import (
     CTI_SEED_SOURCES_ENABLED,
     MIN_TRAIN_MALWARE,
     PE_FETCH_LIMIT,
+    SEMANTIC_MIN_CONFIDENCE,
+    SEMANTIC_REQUIRE_TECHNICAL_REPORT,
 )
 from src.intel.feed_discovery import (
-    discover_candidate_urls,
     is_low_signal_cti_url,
     is_precise_intel_source_url,
 )
@@ -48,31 +49,6 @@ class ThreatIntelCollector:
         if not CTI_SEED_SOURCES_ENABLED:
             return {"enabled": 0, "seeded": 0}
         return seed_curated_sources(self.sources)
-
-    def discover_sources(
-        self,
-        *,
-        max_sources: int = 8,
-        extra_queries: list[str] | None = None,
-    ) -> dict[str, Any]:
-        candidates = discover_candidate_urls(
-            max_sources=max_sources,
-            extra_queries=extra_queries,
-        )
-        added = 0
-        for item in candidates:
-            sid = self.sources.upsert_source(
-                item["url"],
-                source_type=item.get("source_type", "rss"),
-                discovery_query=item.get("discovery_query", ""),
-            )
-            if sid is not None:
-                added += 1
-        return {
-            "discovered": len(candidates),
-            "upserted": added,
-            "total_enabled": self.sources.count_enabled(),
-        }
 
     def poll_due_feeds(
         self,
@@ -208,6 +184,8 @@ class ThreatIntelCollector:
             "ignored": 0,
             "invalid_format": 0,
             "semantic_rejected": 0,
+            "confidence_rejected": 0,
+            "non_report_rejected": 0,
             "corrupted": 0,
             "not_pe": 0,
             "queued_hashes": [],
@@ -234,11 +212,34 @@ class ThreatIntelCollector:
             accepted_shas = {str(i.get("sha256", "")).lower() for i in filtered}
             hash_items = [h for h in hash_items if h["sha256"] in accepted_shas]
             stats["semantic_rejected"] = max(0, before_semantic - len(hash_items))
+
+            enrichment: dict[str, dict[str, Any]] = {}
             for item in filtered:
                 sha = str(item.get("sha256", "")).lower()
+                enrichment[sha] = {
+                    "confidence_score": float(item.get("confidence_score", 0.5)),
+                    "is_technical_report": bool(item.get("is_technical_report", False)),
+                    "malware_family": str(item.get("malware_family", "")),
+                    "semantic_reason": str(item.get("semantic_reason", "")),
+                }
                 for raw in candidates:
                     if raw.get("sha256") == sha:
                         raw["semantic_reason"] = item.get("semantic_reason", "")
+
+            pre_confidence = len(hash_items)
+            hash_items = [
+                h for h in hash_items
+                if enrichment.get(h["sha256"], {}).get("confidence_score", 0.5) >= SEMANTIC_MIN_CONFIDENCE
+            ]
+            stats["confidence_rejected"] = max(0, pre_confidence - len(hash_items))
+
+            if SEMANTIC_REQUIRE_TECHNICAL_REPORT:
+                pre_report = len(hash_items)
+                hash_items = [
+                    h for h in hash_items
+                    if enrichment.get(h["sha256"], {}).get("is_technical_report", False)
+                ]
+                stats["non_report_rejected"] = max(0, pre_report - len(hash_items))
 
         for item in hash_items:
             stats["seen"] += 1
@@ -332,90 +333,6 @@ class ThreatIntelCollector:
                 )
         return candidates
 
-    def web_discover(self, limit: int, queries: list[str] | None = None) -> list[SampleCandidate]:
-        """Web CTI discovery for DynamicCTIProvider delegation."""
-        from src.config import CTI_PAGE_LIMIT
-        from src.tools.cti_search import web_search
-
-        curated_queries = [
-            "site:thedfirreport.com sha256 malware",
-            "site:blog.talosintelligence.com sha256 malware",
-            "site:cloud.google.com/blog/topics/threat-intelligence sha256 malware",
-            "site:github.com ioc sha256 malware windows pe",
-        ]
-        q = list(queries or [])
-        if not q:
-            from src.llm import generate_cti_queries
-
-            q = generate_cti_queries(
-                [
-                    *curated_queries,
-                    "recent Windows PE malware sha256 hashes github",
-                ],
-                limit=3,
-            )
-        for query in curated_queries:
-            if query not in q:
-                q.append(query)
-            if len(q) >= 6:
-                break
-        evidence: list[dict[str, Any]] = []
-        visited: set[str] = set()
-        for query in q:
-            for result in web_search(query):
-                if len(visited) >= CTI_PAGE_LIMIT:
-                    break
-                url = result["url"]
-                if url in visited:
-                    continue
-                if is_low_signal_cti_url(url):
-                    logger.info("Skipping low-signal CTI page: %s", url)
-                    continue
-                visited.add(url)
-                page = fetch_public_text(url)
-                combined = " ".join(
-                    p for p in (result.get("title", ""), result.get("snippet", ""), page) if p
-                )
-                evidence.extend(extract_hash_contexts(combined, url=url))
-
-        candidates: list[SampleCandidate] = []
-        seen: set[str] = set()
-        for item in semantic_filter_hashes(evidence):
-            if len(candidates) >= limit:
-                break
-            sha = str(item.get("sha256", "")).lower()
-            if len(sha) != 64 or sha in seen:
-                continue
-            if (
-                self.tracker.is_downloaded(sha)
-                or self.tracker.is_corrupted(sha)
-                or self.tracker.is_pending(sha)
-            ):
-                continue
-            try:
-                if not self._is_pe_hash_cached(sha):
-                    continue
-            except mb.MalwareBazaarUnavailable:
-                logger.warning("MB circuit open; aborting web_discover PE checks")
-                break
-            seen.add(sha)
-            candidates.append(
-                SampleCandidate(
-                    external_id=sha,
-                    provider="dynamic_cti",
-                    expected_label=1,
-                    download_ref={"sha256": sha},
-                    metadata={
-                        "discovery_source": "dynamic_cti",
-                        "origin_url": item.get("url", ""),
-                        "semantic_evidence": item.get("context", "")[:1000],
-                        "semantic_reason": item.get("semantic_reason", ""),
-                    },
-                )
-            )
-        logger.info("Dynamic CTI web_discover found %d candidate(s)", len(candidates))
-        return candidates
-
     def record_download_outcome(self, metadata: dict[str, Any], *, success: bool) -> None:
         source_id = metadata.get("intel_source_id") or metadata.get("source_id")
         if source_id:
@@ -427,7 +344,6 @@ class ThreatIntelCollector:
     def run_ingest_pass(
         self,
         *,
-        discover: bool = False,
         poll: bool = True,
         max_sources: int = 5,
         max_candidates: int = 50,
@@ -435,8 +351,6 @@ class ThreatIntelCollector:
         result: dict[str, Any] = {}
         if CTI_SEED_SOURCES_ENABLED:
             result["seed_sources"] = self.seed_curated_sources()
-        if discover or self.sources.count_enabled() == 0:
-            result["discover"] = self.discover_sources(max_sources=max_sources)
         raw: list[dict[str, Any]] = []
         if poll:
             native_raw = self.poll_due_feeds(

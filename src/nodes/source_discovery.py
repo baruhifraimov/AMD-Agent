@@ -29,7 +29,6 @@ def source_discovery(state: AgentState) -> dict:
             tracker=tracker,
             ctx=ctx,
             limit=None,
-            cti_queries=state.cti_queries or None,
             stats=discovery_stats,
         )
     elif state.expected_label == 1 and "malwarebazaar" in source_names:
@@ -38,7 +37,6 @@ def source_discovery(state: AgentState) -> dict:
             tracker=tracker,
             ctx=ctx,
             limit=None,
-            cti_queries=state.cti_queries or None,
             stats=discovery_stats,
         )
     elif state.expected_label == 0:
@@ -55,7 +53,6 @@ def source_discovery(state: AgentState) -> dict:
             tracker=tracker,
             ctx=ctx,
             expected_label=state.expected_label,
-            cti_queries=state.cti_queries or None,
             stats=discovery_stats,
         )
     metrics = dict(state.bootstrap_metrics)

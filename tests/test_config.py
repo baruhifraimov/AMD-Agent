@@ -8,7 +8,7 @@ def test_pe_fetch_limit_default():
 
 
 def test_malware_fallback_providers_default():
-    assert config.MALWARE_FALLBACK_PROVIDERS == ("malshare", "threatfox", "dynamic_cti")
+    assert config.MALWARE_FALLBACK_PROVIDERS == ("malshare", "threatfox", "otx_pulse_cti")
 
 
 def test_mb_min_request_interval_default():

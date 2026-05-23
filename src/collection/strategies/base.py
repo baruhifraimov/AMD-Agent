@@ -16,7 +16,6 @@ class SourceSelectionResult:
     discovery_strategy: str
     collection_phase: str
     route_hint: str = ""
-    cti_queries: list[str] = field(default_factory=list)
 
 
 class SourceSelectionStrategy(Protocol):

@@ -17,7 +17,7 @@ VERIFIED_DISCOVERY_SOURCES = frozenset(
         "twitter_cti",
         "sysinternals",
         "github",
-        "dynamic_cti",
+        "otx_pulse_cti",
         "intel_rss",
         "intel_discover",
         "bootstrap_fast_path",
@@ -36,7 +36,7 @@ VERIFIED_SOURCE_PROVIDERS = frozenset(
         "sysinternals",
         "github",
         "benign_net",
-        "dynamic_cti",
+        "otx_pulse_cti",
     }
 )
 

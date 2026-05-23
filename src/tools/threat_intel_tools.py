@@ -12,12 +12,6 @@ def _collector() -> ThreatIntelCollector:
     return ThreatIntelCollector()
 
 
-def discover_intel_sources(max_sources: int = 8) -> str:
-    """Discover new RSS/blog/GitHub intel sources via web search."""
-    stats = _collector().discover_sources(max_sources=max_sources)
-    return json.dumps(stats)
-
-
 def poll_intel_feeds(max_sources: int = 5, max_candidates: int = 50) -> str:
     """Poll due intel feeds and return raw IOC candidates as JSON."""
     raw = _collector().poll_due_feeds(
@@ -49,11 +43,6 @@ def build_intel_tools() -> list[Any]:
         return []
 
     @tool
-    def discover_intel_sources_tool(max_sources: int = 8) -> str:
-        """Discover new CTI RSS/blog/GitHub sources at runtime."""
-        return discover_intel_sources(max_sources=max_sources)
-
-    @tool
     def poll_intel_feeds_tool(max_sources: int = 5, max_candidates: int = 50) -> str:
         """Poll due intel feeds for SHA256 hashes and PE URLs."""
         return poll_intel_feeds(max_sources=max_sources, max_candidates=max_candidates)
@@ -64,7 +53,6 @@ def build_intel_tools() -> list[Any]:
         return validate_and_queue_candidates(candidates_json)
 
     return [
-        discover_intel_sources_tool,
         poll_intel_feeds_tool,
         validate_and_queue_candidates_tool,
     ]

@@ -2,7 +2,6 @@
 
 from src.llm.client import (
     choose_sources_with_ollama,
-    generate_cti_queries,
     semantic_filter_hashes,
     summarize_capa_findings,
     triage_pe_error,
@@ -10,7 +9,6 @@ from src.llm.client import (
 
 __all__ = [
     "choose_sources_with_ollama",
-    "generate_cti_queries",
     "semantic_filter_hashes",
     "summarize_capa_findings",
     "triage_pe_error",

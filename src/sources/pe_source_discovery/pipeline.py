@@ -10,7 +10,6 @@ from src.sources.pe_source_discovery.page_classify import classify_pe_source_pag
 from src.sources.pe_source_discovery.page_fetch import fetch_page_text
 from src.sources.pe_source_discovery.planner import plan_discovery_targets
 from src.sources.pe_source_discovery.registry_register import register_classification
-from src.sources.pe_source_discovery.web_search import search_targets
 from src.sources.pe_source_store import PESourceStore
 
 logger = logging.getLogger(__name__)
@@ -37,12 +36,7 @@ def run_pe_source_discovery(
         "active_count": pe_store.count_active(),
     }
 
-    targets = plan_discovery_targets(
-        registry_summary=f"active={pe_store.count_active()}",
-        need_malware=need_malware,
-        need_benign=need_benign,
-    )
-    urls = search_targets(targets, max_urls=budget)
+    urls: list[dict[str, str]] = []
     stats["searched"] = len(urls)
 
     for row in urls:
