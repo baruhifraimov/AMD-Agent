@@ -197,11 +197,17 @@ def madar_retrain(
         if isinstance(raw, list) and raw:
             frozen = [int(i) for i in raw]
 
+    replay_count = len(replay_idx)
+    _meta = {
+        **(model_metadata or {}),
+        "madar_replay_selected": replay_count,
+    }
+
     phase_log(
         logger,
         PHASE_RETRAIN,
         "MADAR retrain: replay=%d new=%d total=%d feature_reselection=%s",
-        len(replay_idx),
+        replay_count,
         len(new_batch),
         len(y),
         force_feature_reselection,
@@ -225,7 +231,7 @@ def madar_retrain(
                 y_val,
                 old_bundle=init_model,
                 model_metadata={
-                    **(model_metadata or {}),
+                    **_meta,
                     "training_mode": "continuation",
                 },
             )
@@ -237,7 +243,7 @@ def madar_retrain(
         y,
         frozen_feature_indices=frozen,
         model_metadata={
-            **(model_metadata or {}),
+            **_meta,
             "training_mode": "clean_retrain",
         },
         reuse_existing_features=existing is not None and not force_feature_reselection,

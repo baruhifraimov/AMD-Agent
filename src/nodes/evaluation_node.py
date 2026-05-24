@@ -106,6 +106,7 @@ def _record_training_history(merged: dict[str, Any]) -> dict[str, Any]:
     model_version = str(merged.get("model_version") or "")
     task_id = int(merged.get("task_id", 0) or 0)
     sample_count = int(merged.get("new_batch_size", 0) or 0)
+    madar_replay = int(merged.get("madar_replay_selected", 0) or 0)
 
     record = {
         "retrain_count": retrain_count,
@@ -114,6 +115,7 @@ def _record_training_history(merged: dict[str, Any]) -> dict[str, Any]:
         "model_version": model_version,
         "task_id": task_id,
         "sample_count": sample_count,
+        "madar_replay_selected": madar_replay,
         "metrics": current,
         "previous": {k: float(v) for k, v in previous.items() if isinstance(v, (int, float))},
         "delta_pct": delta_pct,
@@ -211,7 +213,19 @@ def evaluation_node(state: AgentState) -> dict:
     if state.pending_drift_log:
         try:
             log_state = state.model_copy(update={"evaluation_metrics": merged})
-            record = build_drift_record(log_state, post_metrics=metrics)
+            post_metrics = {
+                k: float(v)
+                for k, v in metrics.items()
+                if isinstance(v, (int, float))
+            }
+            if not post_metrics:
+                post_metrics = {
+                    k: float(v)
+                    for k, v in merged.items()
+                    if isinstance(v, (int, float))
+                    and k in ("accuracy", "precision", "recall", "fpr", "tpr", "aut")
+                }
+            record = build_drift_record(log_state, post_metrics=post_metrics)
             append_drift_log(record)
             phase_log(logger, PHASE_EVAL, "Drift event logged to drift_log.jsonl")
             out["pending_drift_log"] = False

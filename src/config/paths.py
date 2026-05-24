@@ -21,6 +21,9 @@ if _in_container:
     TRAINING_HISTORY_PATH = Path("/data/training_history.jsonl")
     LOG_PATH = Path("/data/logs/amd-agent.log")
     FIGURES_DIR = Path("/data/figures")
+    LEGACY_FIGURES_DIR = Path("/data/figures")
+    REPORT_DIR = Path("/data/report")
+    REPORT_NARRATIVE_PATH = REPORT_DIR / "REPORT.md"
     REPOS_DIR = Path("/data/repos")
 else:
     SANDBOX_DIR = PROJECT_ROOT / "data" / "sandbox"
@@ -35,6 +38,9 @@ else:
     TRAINING_HISTORY_PATH = PROJECT_ROOT / "data" / "training_history.jsonl"
     LOG_PATH = PROJECT_ROOT / "data" / "logs" / "amd-agent.log"
     FIGURES_DIR = PROJECT_ROOT / "report" / "figures"
+    LEGACY_FIGURES_DIR = PROJECT_ROOT / "data" / "figures"
+    REPORT_DIR = PROJECT_ROOT / "report"
+    REPORT_NARRATIVE_PATH = REPORT_DIR / "REPORT.md"
     REPOS_DIR = PROJECT_ROOT / "data" / "repos"
 
 
@@ -46,6 +52,8 @@ def ensure_dirs() -> None:
         MODEL_PATH.parent,
         BENIGN_DIR,
         FIGURES_DIR,
+        LEGACY_FIGURES_DIR,
+        REPORT_DIR,
         EVAL_STATE_PATH.parent,
         DRIFT_LOG_PATH.parent,
         MODEL_UPDATE_LOG_PATH.parent,
