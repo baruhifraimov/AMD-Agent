@@ -50,6 +50,16 @@ def test_explain_drift_context(mock_summarize):
     assert out["semantic_report"] == "Drift summary."
 
 
+@patch("src.nodes.explain_drift_context.ollama_drift_context_report_enabled", return_value=False)
+@patch("src.nodes.explain_drift_context.summarize_drift_context")
+def test_explain_drift_context_skipped_when_disabled(mock_summarize, _mock_flag):
+    out = explain_drift_context(
+        AgentState(drift_detected=True, drift_stats={"mean_shift": 1.0, "corr_shift": 0.3})
+    )
+    mock_summarize.assert_not_called()
+    assert out["semantic_report"] is None
+
+
 def test_drift_monitor_skips_bootstrap():
     out = drift_monitor(AgentState(collection_phase="bootstrap", feature_vectors=[{"sha256": "a" * 64}]))
     assert out["drift_detected"] is False

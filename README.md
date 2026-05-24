@@ -158,6 +158,8 @@ AMD_OLLAMA_MODEL=gemma4:latest
 
 Disable Ollama entirely by setting `OLLAMA_ENABLED = False` in [`src/config.py`](src/config.py).
 
+Skip only the drift narrative (keep source selection and CTI semantic filtering) with `OLLAMA_DRIFT_CONTEXT_REPORT_ENABLED = False` in [`src/config.py`](src/config.py).
+
 In Docker, compose also reads `AMD_OLLAMA_BASE_URL`. If the variable is not set,
 compose defaults it to:
 
@@ -231,7 +233,7 @@ docker compose up --force-recreate
 
 The default `amd-agent` command (`docker/amd-agent-run.sh`) skips bootstrap when
 trainable counts and `model.pkl` are already ready, then stays in `--daemon`
-(scheduler interval default 1800s; tune `SCHED_INTERVAL_SECONDS` in `src/config.py`).
+(scheduler interval default 300s in dev config; production often 1800s — tune `SCHED_INTERVAL_SECONDS` in `src/config.py`).
 
 One-off graph pass:
 

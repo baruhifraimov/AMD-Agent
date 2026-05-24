@@ -50,13 +50,14 @@ OLLAMA_MODEL = os.getenv("AMD_OLLAMA_MODEL", "").strip()
 # --- Scheduler and bootstrap ---
 
 # Daemon: `python -m src.graph --daemon`
+# Development pacing (~12 runs/hour max); production: interval=1800, jitter=60, max_backoff=3600
 SCHED_ENABLED = False
-SCHED_INTERVAL_SECONDS = 1800
+SCHED_INTERVAL_SECONDS = 300
 SCHED_MAX_RUNS: int | None = None
 SCHED_RUN_ON_START = True
-SCHED_JITTER_SECONDS = 60
+SCHED_JITTER_SECONDS = 30
 SCHED_ERROR_BACKOFF_SECONDS = 60
-SCHED_MAX_BACKOFF_SECONDS = 3600
+SCHED_MAX_BACKOFF_SECONDS = 600
 
 # Bootstrap: `python -m src.graph --bootstrap`
 BOOTSTRAP_MAX_RUNS = 60
@@ -64,7 +65,7 @@ BOOTSTRAP_INTERVAL_SECONDS = 10
 
 # --- Logging ---
 
-VERBOSE = False  # True = detailed per-item console logs (file always full detail)
+VERBOSE = True  # True = detailed per-item console logs (file always full detail)
 LOG_MAX_BYTES = 10 * 1024 * 1024
 LOG_BACKUP_COUNT = 5
 
@@ -76,12 +77,13 @@ OLLAMA_LOG_CONSOLE_PREVIEW = 500
 # --- Feature flags ---
 
 ALLOW_LOCAL_BENIGN = False
-MALSHARE_ENABLED = False
+MALSHARE_ENABLED = True
 MB_FALLBACK_MALSHARE = False
 PE_SOURCE_DISCOVERY_ENABLED = False
 CTI_SEED_SOURCES_ENABLED = True
 OLLAMA_ENABLED = True
 OLLAMA_SOURCE_SELECTION_ENABLED = True
+OLLAMA_DRIFT_CONTEXT_REPORT_ENABLED = False
 FORCED_BENIGN_PROVIDER: str | None = None
 
 # --- Machine learning (training, FPR, drift, MADAR, feature version) ---
@@ -404,3 +406,7 @@ def pe_source_discovery_enabled() -> bool:
 
 def ollama_source_selection_enabled() -> bool:
     return OLLAMA_SOURCE_SELECTION_ENABLED
+
+
+def ollama_drift_context_report_enabled() -> bool:
+    return OLLAMA_DRIFT_CONTEXT_REPORT_ENABLED
