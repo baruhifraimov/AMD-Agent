@@ -91,8 +91,8 @@ FORCED_BENIGN_PROVIDER: str | None = None
 REPLAY_BUDGET = 3000
 MIN_TRAIN_MALWARE = 25
 MIN_TRAIN_BENIGN = 25
-PE_FETCH_LIMIT = 10
-THRESHOLD_RETRAIN_MIN_NEW_SAMPLES = 20  # retrain when N untrained featured samples accumulate
+PE_FETCH_LIMIT = 25
+THRESHOLD_RETRAIN_MIN_NEW_SAMPLES = 50  # retrain when N untrained featured samples accumulate; exceeds PE_FETCH_LIMIT=25
 
 TARGET_FPR = 0.001  # production ceiling (5k+ trainable benign in DB)
 TARGET_FPR_BOOTSTRAP = 0.05  # <1k benign
@@ -118,9 +118,9 @@ REPLAY_FRACTION = 0.3  # DEPRECATED
 # Drift (DEV: sensitive — production targets noted inline)
 ADWIN_DELTA = 0.002
 DRIFT_WINDOW_DAYS = 0  # 0 = disable time pruning (_prune_time_window no-op)
-DRIFT_MIN_WINDOW_SAMPLES = 5  # multivariate needs len(vectors) >= 10 (5 * 2)
-DRIFT_MEAN_SHIFT_THRESHOLD = 0.2  # production: 1.5
-DRIFT_CORR_SHIFT_THRESHOLD = 0.1  # production: 0.35
+DRIFT_MIN_WINDOW_SAMPLES = 20  # multivariate needs len(vectors) >= 40 (20 * 2)
+DRIFT_MEAN_SHIFT_THRESHOLD = 1.5  # production value
+DRIFT_CORR_SHIFT_THRESHOLD = 0.35  # production value
 
 # MADAR replay and LightGBM continuation
 MADAR_CONTAMINATION = 0.1
@@ -182,7 +182,23 @@ MB_USER_AGENT = (
 MB_USER_AGENT_CONTACT = ""
 MB_INFO_CACHE_TTL_DAYS = 30
 MB_DAILY_DOWNLOAD_LIMIT = 1900
-MB_MAX_INFO_CALLS_PER_RUN = 0
+MB_MAX_INFO_CALLS_PER_RUN = 50
+
+# ThreatFox (abuse.ch; same Auth-Key as MalwareBazaar)
+THREATFOX_API_URL = "https://threatfox-api.abuse.ch/api/v1/"
+TF_MIN_REQUEST_INTERVAL = 1.0
+TF_GET_IOCS_TIMEOUT = 120.0
+TF_GET_IOCS_DAYS_DEFAULT = 1
+TF_CIRCUIT_FAILURE_THRESHOLD = 3
+TF_CIRCUIT_OPEN_SECONDS = 120.0
+TF_CIRCUIT_OPEN_SECONDS_429 = 3600.0
+TF_USER_AGENT = (
+    "AMD-Agent/1.0 (malware-ml-research; contact via MALWAREBAZAAR_AUTH_KEY holder)"
+)
+THREATFOX_DISCOVERY_SCAN_MULT = 20
+# Fallback when get_iocs payload is truncated (abuse.ch returns very large JSON).
+THREATFOX_TAG_QUERIES = ("exe", "dll", "peexe", "pedll")
+THREATFOX_TAGINFO_LIMIT = 100
 
 # CTI web fetch
 CTI_HOST_BLOCK_SECONDS_403 = 900.0
@@ -201,6 +217,7 @@ OTX_ENABLED = True
 OTX_PULSE_DAYS = 7
 OTX_PULSE_LIMIT = 10
 OTX_PULSE_MAX_HASHES = 30
+OTX_SKIP_SEMANTIC_FILTER_BOOTSTRAP = True
 
 # Ollama model behavior
 OLLAMA_TIMEOUT = 8.0
@@ -394,6 +411,10 @@ def allow_local_benign() -> bool:
 
 def malshare_enabled() -> bool:
     return MALSHARE_ENABLED
+
+
+def otx_enabled() -> bool:
+    return OTX_ENABLED and bool(OTX_API_KEY)
 
 
 def mb_fallback_malshare() -> bool:
