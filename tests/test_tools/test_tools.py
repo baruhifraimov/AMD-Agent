@@ -18,6 +18,8 @@ def test_is_pe_sample_filters():
     assert is_pe_sample({"file_type_mime": "application/x-dosexec"})
     assert is_pe_sample({"magika": "pebin"})
     assert is_pe_sample({"file_type": "exe"})
+    assert is_pe_sample({"file_type": "cpl"})
+    assert is_pe_sample({"file_type": "mun"})
     assert not is_pe_sample({"file_type": "elf"})
 
 
@@ -72,26 +74,56 @@ def test_get_file_type_mock(httpx_mock, tmp_paths):
     assert len(samples) == 1
 
 
-def test_get_recent_pe_queries_file_types_before_recent(httpx_mock, tmp_paths):
-    for prefix, file_type in zip("abcd", ("exe", "dll", "sys", "scr")):
+def test_get_recent_pe_uses_get_recent_by_default(httpx_mock, tmp_paths):
+    for prefix in "ab":
         httpx_mock.add_response(
             method="POST",
             url="https://mb-api.abuse.ch/api/v1/",
             json={
                 "query_status": "ok",
                 "data": [
-                    {"sha256_hash": prefix * 64, "file_type": file_type},
+                    {"sha256_hash": prefix * 64, "file_type_mime": "application/x-dosexec"},
                 ],
             },
         )
-    samples = get_recent_pe(limit=4)
-    assert len(samples) == 4
+    samples = get_recent_pe(limit=2)
+    assert len(samples) == 2
     bodies = [request.content.decode() for request in httpx_mock.get_requests()]
-    assert all(f"file_type={file_type}" in "&".join(bodies) for file_type in ("exe", "dll", "sys", "scr"))
-    assert all("query=get_file_type" in body for body in bodies)
+    assert all("query=get_recent" in body for body in bodies)
+    assert not any("query=get_file_type" in body for body in bodies)
 
 
-def test_get_recent_pe_continues_after_file_type_502(httpx_mock, tmp_paths):
+def test_get_recent_pe_uses_file_type_when_enabled_and_recent_is_dry(httpx_mock, tmp_paths, monkeypatch):
+    monkeypatch.setattr("src.config.MB_USE_GET_FILE_TYPE_QUERY", True)
+    for _ in ("time", "100"):
+        httpx_mock.add_response(
+            method="POST",
+            url="https://mb-api.abuse.ch/api/v1/",
+            json={"query_status": "ok", "data": []},
+        )
+    httpx_mock.add_response(
+        method="POST",
+        url="https://mb-api.abuse.ch/api/v1/",
+        json={
+            "query_status": "ok",
+            "data": [{"sha256_hash": "b" * 64, "file_type": "dll"}],
+        },
+    )
+    samples = get_recent_pe(limit=1)
+    assert len(samples) == 1
+    assert samples[0]["sha256_hash"] == "b" * 64
+    bodies = [request.content.decode() for request in httpx_mock.get_requests()]
+    assert any("query=get_file_type" in body for body in bodies)
+
+
+def test_get_recent_pe_continues_after_file_type_502(httpx_mock, tmp_paths, monkeypatch):
+    monkeypatch.setattr("src.config.MB_USE_GET_FILE_TYPE_QUERY", True)
+    for _ in ("time", "100"):
+        httpx_mock.add_response(
+            method="POST",
+            url="https://mb-api.abuse.ch/api/v1/",
+            json={"query_status": "ok", "data": []},
+        )
     httpx_mock.add_response(
         method="POST",
         url="https://mb-api.abuse.ch/api/v1/",
@@ -102,9 +134,7 @@ def test_get_recent_pe_continues_after_file_type_502(httpx_mock, tmp_paths):
         url="https://mb-api.abuse.ch/api/v1/",
         json={
             "query_status": "ok",
-            "data": [
-                {"sha256_hash": "b" * 64, "file_type": "dll"},
-            ],
+            "data": [{"sha256_hash": "b" * 64, "file_type": "dll"}],
         },
     )
     samples = get_recent_pe(limit=1)
@@ -112,13 +142,7 @@ def test_get_recent_pe_continues_after_file_type_502(httpx_mock, tmp_paths):
     assert samples[0]["sha256_hash"] == "b" * 64
 
 
-def test_get_recent_pe_falls_back_to_recent_when_file_types_are_dry(httpx_mock, tmp_paths):
-    for _ in ("exe", "dll", "sys", "scr"):
-        httpx_mock.add_response(
-            method="POST",
-            url="https://mb-api.abuse.ch/api/v1/",
-            json={"query_status": "ok", "data": []},
-        )
+def test_get_recent_pe_filters_non_pe_from_recent(httpx_mock, tmp_paths):
     payload = {
         "query_status": "ok",
         "data": [

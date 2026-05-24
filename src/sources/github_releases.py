@@ -9,6 +9,7 @@ from typing import Any
 import httpx
 
 from src.config import GITHUB_API_URL, GITHUB_BENIGN_REPOS, get_github_token
+from src.pe.profile import PE_ARCHIVE_SUFFIXES
 from src.sources.base import PESourceProvider, SampleCandidate
 
 from src.log import PHASE_DISCOVERY, get_logger, phase_log, vlog
@@ -16,7 +17,6 @@ from src.log import PHASE_DISCOVERY, get_logger, phase_log, vlog
 logger = get_logger(__name__)
 
 DISCOVERABLE_ASSET_SUFFIXES = (".exe", ".zip")
-PE_ARCHIVE_SUFFIXES = (".exe", ".dll", ".sys", ".scr")
 
 
 class GitHubReleasesProvider(PESourceProvider):

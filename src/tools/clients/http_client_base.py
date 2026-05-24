@@ -174,6 +174,30 @@ class HttpApiClient:
                         continue
                     self._circuit.open_for_rate_limit()
                     raise ApiUnavailable("Rate limited (HTTP 429)") from None
+                if response.status_code in RETRYABLE_STATUS:
+                    status_exc = httpx.HTTPStatusError(
+                        f"HTTP {response.status_code}",
+                        request=response.request,
+                        response=response,
+                    )
+                    last_exc = status_exc
+                    if attempt < len(self._backoff_seconds):
+                        delay = self._backoff_seconds[attempt]
+                        vlog(
+                            logger,
+                            "warning",
+                            "HTTP %s on %s; backing off %.0fs (attempt %d)",
+                            response.status_code,
+                            self.base_url,
+                            delay,
+                            attempt + 1,
+                        )
+                        time.sleep(delay)
+                        continue
+                    self._circuit.record_failure(status_exc)
+                    if not self._circuit.available():
+                        raise ApiUnavailable("API circuit opened") from status_exc
+                    raise status_exc
                 response.raise_for_status()
                 self._circuit.record_success()
                 return response

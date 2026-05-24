@@ -6,6 +6,8 @@ Edit tuning constants here; secrets live in `.env` (see `.env.example`).
 import os
 from pathlib import Path
 
+from src.pe.profile import PE_TAG_QUERIES
+
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 # --- Paths and storage (local vs Docker) ---
@@ -181,8 +183,12 @@ MB_USER_AGENT = (
 )
 MB_USER_AGENT_CONTACT = ""
 MB_INFO_CACHE_TTL_DAYS = 30
+# abuse.ch fair-use: 2,000 get_file downloads per IP/day; bulk use hourly/daily exports.
 MB_DAILY_DOWNLOAD_LIMIT = 1900
 MB_MAX_INFO_CALLS_PER_RUN = 50
+# get_file_type is often slow/502 upstream; get_recent is the reliable PE discovery path.
+MB_USE_GET_FILE_TYPE_QUERY = False
+MB_GET_FILE_TYPE_TIMEOUT = 15.0
 
 # ThreatFox (abuse.ch; same Auth-Key as MalwareBazaar)
 THREATFOX_API_URL = "https://threatfox-api.abuse.ch/api/v1/"
@@ -197,7 +203,7 @@ TF_USER_AGENT = (
 )
 THREATFOX_DISCOVERY_SCAN_MULT = 20
 # Fallback when get_iocs payload is truncated (abuse.ch returns very large JSON).
-THREATFOX_TAG_QUERIES = ("exe", "dll", "peexe", "pedll")
+THREATFOX_TAG_QUERIES = PE_TAG_QUERIES
 THREATFOX_TAGINFO_LIMIT = 100
 
 # CTI web fetch

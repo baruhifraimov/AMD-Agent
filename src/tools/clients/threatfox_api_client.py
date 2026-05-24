@@ -12,6 +12,7 @@ from src.config import get_auth_key
 from src.tools.clients.http_client_base import ApiUnavailable, CircuitBreaker, HttpApiClient
 
 from src.log import get_logger, vlog
+from src.pe.profile import PE_CTI_TAGS
 
 logger = get_logger(__name__)
 
@@ -20,7 +21,6 @@ SHA256_IOC_TYPES = frozenset({"sha256_hash", "hash", "file_hash", "sha256"})
 SHA256_RE = re.compile(r"^[a-fA-F0-9]{64}$")
 SOCIAL_REFERENCE_RE = re.compile(r"(?:twitter\.com|x\.com)", re.I)
 _BAZAAR_LINK_RE = re.compile(r"bazaar\.abuse\.ch", re.I)
-_PE_PRIORITY_TAGS = frozenset({"exe", "dll", "pe", "peexe", "pedll", "sys", "scr"})
 _BACKOFF_SECONDS = (10.0, 30.0, 60.0)
 
 
@@ -135,7 +135,7 @@ class ThreatFoxClient(HttpApiClient):
         if mb_linked:
             score -= 30
         tags = {str(t).lower() for t in (row.get("tags") or []) if isinstance(t, str)}
-        if tags & _PE_PRIORITY_TAGS:
+        if tags & PE_CTI_TAGS:
             score -= 20
         return score
 
