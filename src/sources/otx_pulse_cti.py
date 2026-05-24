@@ -11,7 +11,15 @@ from __future__ import annotations
 from typing import Any
 
 import src.db.tracker as db
-from src.config import OTX_API_KEY, OTX_ENABLED, OTX_PULSE_DAYS, OTX_PULSE_LIMIT, OTX_PULSE_MAX_HASHES
+from src.config import (
+    OTX_API_KEY,
+    OTX_ENABLED,
+    OTX_PULSE_DAYS,
+    OTX_PULSE_LIMIT,
+    OTX_PULSE_MAX_HASHES,
+    OTX_SKIP_SEMANTIC_FILTER_BOOTSTRAP,
+    otx_enabled,
+)
 from src.llm import semantic_filter_hashes
 from src.log import PHASE_DISCOVERY, get_logger, phase_log, task_status, vlog
 from src.sources.base import PESourceProvider, SampleCandidate
@@ -30,8 +38,9 @@ class OTXPulseCTIProvider(PESourceProvider):
         limit: int,
         *,
         queries: list[str] | None = None,
+        collection_phase: str | None = None,
     ) -> list[SampleCandidate]:
-        if not OTX_ENABLED or not OTX_API_KEY:
+        if not otx_enabled():
             phase_log(logger, PHASE_DISCOVERY, "OTX disabled or API key not set; skipping")
             return []
 
@@ -83,8 +92,13 @@ class OTXPulseCTIProvider(PESourceProvider):
                     if mb.is_pe_hash(sha):
                         pe_evidence.append(item)
                 except mb.MalwareBazaarUnavailable:
-                    logger.warning("[%s] MB circuit open; aborting OTX PE pre-check", PHASE_DISCOVERY)
-                    break
+                    vlog(
+                        logger,
+                        "debug",
+                        "OTX skip %s (MB unavailable during is_pe_hash)",
+                        sha,
+                    )
+                    continue
 
         if skipped_cached:
             vlog(logger, "info", "OTX skipped %d hashes already cached as non-PE", skipped_cached)
@@ -99,7 +113,10 @@ class OTXPulseCTIProvider(PESourceProvider):
             )
             return []
 
-        filtered = semantic_filter_hashes(pe_evidence)
+        if collection_phase == "bootstrap" and OTX_SKIP_SEMANTIC_FILTER_BOOTSTRAP:
+            filtered = pe_evidence
+        else:
+            filtered = semantic_filter_hashes(pe_evidence)
 
         candidates: list[SampleCandidate] = []
         seen: set[str] = set()

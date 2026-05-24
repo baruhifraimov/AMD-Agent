@@ -26,9 +26,27 @@ def _extract_sha256(row: dict[str, Any]) -> str | None:
     return ThreatFoxClient._extract_sha256(row)
 
 
-def get_recent_sha256_hashes(*, days: int = 7, limit: int = 10) -> list[dict[str, Any]]:
-    return _get_client().get_recent_sha256_hashes(days=days, limit=limit)
+def get_recent_sha256_hashes(
+    *,
+    days: int | None = None,
+    limit: int = 10,
+    scan_budget: int | None = None,
+) -> list[dict[str, Any]]:
+    return _get_client().get_recent_sha256_hashes(
+        days=days,
+        limit=limit,
+        scan_budget=scan_budget,
+    )
 
 
-def get_social_sha256_hashes(*, days: int = 7, limit: int = 10) -> list[dict[str, Any]]:
-    return _get_client().get_social_sha256_hashes(days=days, limit=limit)
+def get_social_sha256_hashes(
+    *,
+    days: int | None = None,
+    limit: int = 10,
+    scan_budget: int | None = None,
+) -> list[dict[str, Any]]:
+    return _get_client().get_social_sha256_hashes(
+        days=days,
+        limit=limit,
+        scan_budget=scan_budget,
+    )

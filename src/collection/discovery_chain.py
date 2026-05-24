@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import src.db.tracker as db
 from src.collection.context import CollectionContext, build_collection_context
-from src.config import BENIGN_PROVIDER_NAMES, MALWARE_FALLBACK_PROVIDERS, PE_FETCH_LIMIT, malshare_enabled
+from src.collection.malware_sources import bootstrap_malware_sources
+from src.config import BENIGN_PROVIDER_NAMES, MALWARE_FALLBACK_PROVIDERS, PE_FETCH_LIMIT
 from src.collection.provider_stats import summarize_discovery_providers
 from src.log import PHASE_DISCOVERY, get_logger, phase_log, vlog
 from src.tools.malwarebazaar_api import reset_mb_run_budget
@@ -102,8 +103,11 @@ def _discover_source_candidates(
     request_limit: int,
     registry: SourceRegistry,
     tracker: db.MalwareTracker,
+    ctx: CollectionContext | None = None,
 ) -> tuple[str, list[SampleCandidate]]:
     provider = registry.get(source_name)
+    if source_name == "otx_pulse_cti" and ctx is not None:
+        return provider.name, provider.discover(request_limit, collection_phase=ctx.phase)
     return provider.name, provider.discover(request_limit)
 
 
@@ -124,10 +128,13 @@ def discover_active_malware_sources(
     if ctx is None:
         ctx = build_collection_context(tracker)
     fetch_limit = limit or PE_FETCH_LIMIT
-    requested_sources = list(dict.fromkeys(source_names or ["malwarebazaar"]))
+    requested_sources = list(dict.fromkeys(source_names or bootstrap_malware_sources(registry)))
     available = set(registry.list_names())
 
-    if not malshare_enabled() or "malshare" not in available:
+    active_sources = [
+        name for name in bootstrap_malware_sources(registry) if name in available
+    ]
+    if not active_sources:
         return discover_with_fallback(
             requested_sources,
             registry=registry,
@@ -135,24 +142,19 @@ def discover_active_malware_sources(
             ctx=ctx,
             expected_label=1,
             limit=fetch_limit,
-
             stats=stats,
         )
 
-    active_sources = ["malwarebazaar", "malshare"]
     candidates: list[SampleCandidate] = []
     seen = {
         _candidate_key(candidate)
         for candidate in (existing_candidates or [])
         if _candidate_key(candidate)
     }
-    slots = {
-        "malwarebazaar": (fetch_limit + 1) // 2,
-        "malshare": fetch_limit // 2,
-    }
+    slots = _source_slots(active_sources, fetch_limit)
 
     for source_name in active_sources:
-        slot = slots[source_name]
+        slot = slots.get(source_name, 0)
         if slot <= 0:
             continue
         provider_name = source_name
@@ -163,7 +165,7 @@ def discover_active_malware_sources(
                 request_limit=request_limit,
                 registry=registry,
                 tracker=tracker,
-    
+                ctx=ctx,
             )
         except Exception as exc:
             logger.warning("[%s] Discovery failed for provider=%s: %s", PHASE_DISCOVERY, provider_name, exc)
@@ -388,7 +390,7 @@ def discover_mixed_sources(
     malware_stats: list[dict] = []
     benign_stats: list[dict] = []
     malware = discover_active_malware_sources(
-        ["malwarebazaar"],
+        bootstrap_malware_sources(registry),
         registry=registry,
         tracker=tracker,
         ctx=ctx,
@@ -461,7 +463,7 @@ def discover_with_fallback(
                 request_limit=request_limit,
                 registry=registry,
                 tracker=tracker,
-    
+                ctx=ctx,
             )
         except Exception as exc:
             logger.warning("[%s] Discovery failed for provider=%s: %s", PHASE_DISCOVERY, provider_name, exc)

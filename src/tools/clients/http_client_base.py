@@ -108,12 +108,14 @@ class HttpApiClient:
         min_request_interval: float = 0.0,
         circuit: CircuitBreaker | None = None,
         backoff_seconds: tuple[float, ...] = DEFAULT_BACKOFF_SECONDS,
+        http2: bool = False,
     ) -> None:
         self.base_url = base_url.rstrip("/") + "/" if not base_url.endswith("/") else base_url
         self.headers = dict(headers or {})
         self._limiter = RateLimiter(min_request_interval)
         self._circuit = circuit or CircuitBreaker()
         self._backoff_seconds = backoff_seconds
+        self._http2 = http2
 
     @property
     def circuit(self) -> CircuitBreaker:
@@ -144,7 +146,7 @@ class HttpApiClient:
         for attempt in range(len(self._backoff_seconds) + 1):
             self._limiter.wait()
             try:
-                with httpx.Client(timeout=timeout) as client:
+                with httpx.Client(timeout=timeout, http2=self._http2) as client:
                     if use_json:
                         response = client.post(
                             self.base_url,
@@ -177,6 +179,25 @@ class HttpApiClient:
                 return response
             except ApiUnavailable:
                 raise
+            except httpx.TransportError as exc:
+                last_exc = exc
+                if attempt < len(self._backoff_seconds):
+                    delay = self._backoff_seconds[attempt]
+                    vlog(
+                        logger,
+                        "warning",
+                        "Transport error on %s; backing off %.0fs (attempt %d): %s",
+                        self.base_url,
+                        delay,
+                        attempt + 1,
+                        exc,
+                    )
+                    time.sleep(delay)
+                    continue
+                self._circuit.record_failure(exc)
+                if not self._circuit.available():
+                    raise ApiUnavailable("API circuit opened") from exc
+                raise
             except Exception as exc:
                 last_exc = exc
                 self._circuit.record_failure(exc)
@@ -200,7 +221,7 @@ class HttpApiClient:
         self._limiter.wait()
         url = self.base_url + endpoint.lstrip("/") if endpoint else self.base_url
         try:
-            with httpx.Client(timeout=timeout) as client:
+            with httpx.Client(timeout=timeout, http2=self._http2) as client:
                 response = client.get(url, params=params, headers=self.headers)
             response.raise_for_status()
             self._circuit.record_success()

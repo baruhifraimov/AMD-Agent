@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from src.collection.context import CollectionContext
+from src.collection.malware_sources import bootstrap_malware_sources
 from src.collection.strategies.base import SourceSelectionResult
 from src.config import MIN_TRAIN_BENIGN, MIN_TRAIN_MALWARE
 import src.db.tracker as db
@@ -18,9 +19,10 @@ class BootstrapSelectionStrategy:
         registry = get_registry()
         malware_deficit = max(0, MIN_TRAIN_MALWARE - ctx.malware_count)
         benign_deficit = max(0, MIN_TRAIN_BENIGN - ctx.benign_count)
+        malware_sources = bootstrap_malware_sources(registry)
 
         if malware_deficit > 0 and benign_deficit > 0:
-            selected_sources = ["malwarebazaar", *choose_benign_sources(registry, self.tracker)]
+            selected_sources = [*malware_sources, *choose_benign_sources(registry, self.tracker)]
             return SourceSelectionResult(
                 source_type="mixed",
                 selected_sources=selected_sources,
@@ -31,10 +33,10 @@ class BootstrapSelectionStrategy:
             )
 
         if malware_deficit >= benign_deficit and malware_deficit > 0:
-            provider = registry.get("malwarebazaar")
+            provider = registry.get(malware_sources[0])
             return SourceSelectionResult(
                 source_type=provider.name,
-                selected_sources=[provider.name],
+                selected_sources=malware_sources,
                 expected_label=1,
                 discovery_strategy="bootstrap_fast_path",
                 collection_phase="bootstrap",
@@ -53,10 +55,10 @@ class BootstrapSelectionStrategy:
                 route_hint="source_discovery",
             )
 
-        provider = registry.get("malwarebazaar")
+        provider = registry.get(malware_sources[0])
         return SourceSelectionResult(
             source_type=provider.name,
-            selected_sources=[provider.name],
+            selected_sources=malware_sources,
             expected_label=1,
             discovery_strategy="bootstrap_fast_path",
             collection_phase="bootstrap",

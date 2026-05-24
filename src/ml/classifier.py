@@ -725,6 +725,9 @@ def cold_start_train(tracker: db.MalwareTracker) -> dict[str, Any] | None:
         return None
 
     model_version = make_model_version()
+    _target_fpr = resolve_target_fpr()
+    _val_benign = int(np.sum(y_val == 0))
+    _min_required_benign = int(1.0 / _target_fpr) if _target_fpr > 0 else 0
     try:
         bundle = fit_model_artifact(
             X_train,
@@ -732,7 +735,7 @@ def cold_start_train(tracker: db.MalwareTracker) -> dict[str, Any] | None:
             X_val,
             y_val,
             training_counts=counts,
-            optimize=True,
+            optimize=_val_benign >= _min_required_benign,
             split_mode="stratified",
             model_metadata={
                 "model_version": model_version,

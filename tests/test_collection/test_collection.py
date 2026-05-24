@@ -15,11 +15,15 @@ from src.sources.registry import SourceRegistry
 from src.sources.sysinternals import SysinternalsProvider
 
 
-def _registry() -> SourceRegistry:
+def _registry(*, include_otx: bool = False) -> SourceRegistry:
     reg = SourceRegistry()
     reg.register(MalwareBazaarProvider())
     reg.register(SysinternalsProvider())
     reg.register(GitHubReleasesProvider())
+    if include_otx:
+        otx = MagicMock()
+        otx.name = "otx_pulse_cti"
+        reg.register(otx)
     return reg
 
 
@@ -39,6 +43,26 @@ def test_bootstrap_mixed_when_both_labels_need_samples(_mock_reg):
     assert result.expected_label == -1
     assert result.collection_phase == "bootstrap"
     assert result.discovery_strategy == "bootstrap_mixed_balance"
+
+
+@patch("src.collection.malware_sources.otx_enabled", return_value=True)
+@patch("src.collection.malware_sources.malshare_enabled", return_value=False)
+@patch("src.collection.strategies.bootstrap.get_registry", side_effect=lambda: _registry(include_otx=True))
+def test_bootstrap_malware_includes_otx_when_enabled(_mock_reg, _mock_ms, _mock_otx):
+    ctx = CollectionContext(benign_count=100, malware_count=10, model_ready=False, pending_depth=0)
+    result = BootstrapSelectionStrategy(tracker=_tracker()).select(ctx)
+    assert result.expected_label == 1
+    assert "malwarebazaar" in result.selected_sources
+    assert "otx_pulse_cti" in result.selected_sources
+
+
+@patch("src.collection.malware_sources.otx_enabled", return_value=False)
+@patch("src.collection.malware_sources.malshare_enabled", return_value=False)
+@patch("src.collection.strategies.bootstrap.get_registry", side_effect=lambda: _registry())
+def test_bootstrap_malware_excludes_otx_when_disabled(_mock_reg, _mock_ms, _mock_otx):
+    ctx = CollectionContext(benign_count=100, malware_count=10, model_ready=False, pending_depth=0)
+    result = BootstrapSelectionStrategy(tracker=_tracker()).select(ctx)
+    assert result.selected_sources == ["malwarebazaar"]
 
 
 @patch("src.collection.strategies.steady.get_registry", side_effect=lambda: _registry())
@@ -144,8 +168,9 @@ def test_pending_hash_excluded_from_discovery():
     )
 
 
-@patch("src.collection.discovery_chain.malshare_enabled", return_value=True)
-def test_active_malware_split_mb_malshare(_malshare_on, monkeypatch):
+@patch("src.collection.malware_sources.otx_enabled", return_value=False)
+@patch("src.collection.malware_sources.malshare_enabled", return_value=True)
+def test_active_malware_split_mb_malshare(_malshare_on, _otx_off, monkeypatch):
     monkeypatch.setenv("MALWAREBAZAAR_AUTH_KEY", "test-key")
     mb = MagicMock()
     mb.name = "malwarebazaar"

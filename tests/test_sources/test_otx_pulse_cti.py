@@ -75,15 +75,46 @@ def test_otx_returns_empty_when_semantic_filter_rejects_all(mock_filter, mock_is
 
 
 def test_otx_disabled_returns_empty():
-    with patch("src.sources.otx_pulse_cti.OTX_ENABLED", False):
+    with patch("src.sources.otx_pulse_cti.otx_enabled", return_value=False):
         candidates = OTXPulseCTIProvider().discover(limit=5)
     assert candidates == []
 
 
 def test_otx_no_api_key_returns_empty():
-    with patch("src.sources.otx_pulse_cti.OTX_API_KEY", ""):
+    with patch("src.sources.otx_pulse_cti.otx_enabled", return_value=False):
         candidates = OTXPulseCTIProvider().discover(limit=5)
     assert candidates == []
+
+
+@patch("src.sources.otx_pulse_cti.otx_enabled", return_value=True)
+@patch("src.sources.otx_pulse_cti.semantic_filter_hashes")
+@patch("src.sources.otx_pulse_cti.mb.is_pe_hash", return_value=True)
+def test_otx_skips_semantic_filter_in_bootstrap(mock_is_pe, mock_filter, _mock_otx, tmp_paths):
+    sha = "e" * 64
+    pulse = {
+        "pulse_id": "p3",
+        "pulse_name": "Bootstrap pulse",
+        "sha256_hashes": [sha],
+        "raw_text": "malware campaign",
+    }
+    with patch("src.tools.clients.otx_api_client.OTXApiClient") as mock_client_cls:
+        mock_client_cls.return_value.get_recent_pulses.return_value = [pulse]
+        candidates = OTXPulseCTIProvider().discover(limit=5, collection_phase="bootstrap")
+    assert len(candidates) == 1
+    mock_filter.assert_not_called()
+
+
+@patch("src.sources.otx_pulse_cti.otx_enabled", return_value=True)
+@patch("src.sources.otx_pulse_cti.semantic_filter_hashes")
+@patch("src.sources.otx_pulse_cti.mb.is_pe_hash", return_value=True)
+def test_otx_uses_semantic_filter_in_steady(mock_is_pe, mock_filter, _mock_otx, tmp_paths):
+    sha = "f" * 64
+    mock_filter.return_value = [{"sha256": sha, "context": "malware", "semantic_reason": "ok"}]
+    pulse = {"sha256_hashes": [sha], "raw_text": "steady pulse"}
+    with patch("src.tools.clients.otx_api_client.OTXApiClient") as mock_client_cls:
+        mock_client_cls.return_value.get_recent_pulses.return_value = [pulse]
+        OTXPulseCTIProvider().discover(limit=5, collection_phase="steady")
+    mock_filter.assert_called_once()
 
 
 @patch("src.sources.otx_pulse_cti.mb.is_pe_hash", return_value=True)

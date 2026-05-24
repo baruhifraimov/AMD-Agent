@@ -12,8 +12,10 @@ from src.collection.discovery_chain import (
     discover_with_fallback,
 )
 from src.collection.factory import CollectionStrategyFactory
+from src.collection.malware_sources import bootstrap_malware_sources
 
 __all__ = [
+    "bootstrap_malware_sources",
     "CollectionContext",
     "CollectionStrategyFactory",
     "build_collection_context",
