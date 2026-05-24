@@ -17,11 +17,14 @@ logger = get_logger(__name__)
 
 def _known_bad_or_downloaded(candidate: SampleCandidate, tracker: db.MalwareTracker) -> bool:
     sha = str(candidate.download_ref.get("sha256") or candidate.external_id).lower()
-    return len(sha) == 64 and (
+    if len(sha) == 64 and (
         tracker.is_downloaded(sha)
         or tracker.is_corrupted(sha)
         or tracker.is_pending(sha)
-    )
+    ):
+        return True
+    url = _candidate_source_url(candidate)
+    return bool(url) and tracker.is_source_url_seen(url)
 
 
 def _candidate_key(candidate: SampleCandidate) -> str:
@@ -445,10 +448,10 @@ def discover_with_fallback(
     provider_chain = list(dict.fromkeys(source_names))
     primary_sources = set(provider_chain)
 
-    if expected_label == 1:
-        for fallback in MALWARE_FALLBACK_PROVIDERS:
-            if fallback in available and fallback not in provider_chain:
-                provider_chain.append(fallback)
+    fallback_pool = MALWARE_FALLBACK_PROVIDERS if expected_label == 1 else BENIGN_PROVIDER_NAMES
+    for fallback in fallback_pool:
+        if fallback in available and fallback not in provider_chain:
+            provider_chain.append(fallback)
 
     for source_name in provider_chain:
         if len(candidates) >= fetch_limit:
@@ -514,6 +517,8 @@ def discover_with_fallback(
             fetch_limit,
         )
 
+    total_discovered = sum(int(s.get("discovered", 0)) for s in (stats or []))
+    total_fresh = sum(int(s.get("fresh", 0)) for s in (stats or []))
     phase_log(
         logger,
         PHASE_DISCOVERY,
@@ -523,4 +528,19 @@ def discover_with_fallback(
         expected_label,
         summarize_discovery_providers(stats or []),
     )
+    if len(candidates) == 0 and total_discovered > 0:
+        logger.warning(
+            "[%s] ZERO-YIELD: discovered %d samples but ALL were duplicates "
+            "(fresh=%d). The discovery pool is exhausted — "
+            "new samples are arriving slower than the pipeline polls.",
+            PHASE_DISCOVERY,
+            total_discovered,
+            total_fresh,
+        )
+    elif len(candidates) == 0 and total_discovered == 0:
+        logger.warning(
+            "[%s] ZERO-YIELD: no samples discovered from any provider. "
+            "Check API keys, network, and circuit breaker status.",
+            PHASE_DISCOVERY,
+        )
     return candidates[:fetch_limit]

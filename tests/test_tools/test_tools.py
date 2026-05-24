@@ -142,7 +142,10 @@ def test_get_recent_pe_continues_after_file_type_502(httpx_mock, tmp_paths, monk
     assert samples[0]["sha256_hash"] == "b" * 64
 
 
-def test_get_recent_pe_filters_non_pe_from_recent(httpx_mock, tmp_paths):
+def test_get_recent_pe_filters_non_pe_from_recent(httpx_mock, tmp_paths, monkeypatch):
+    monkeypatch.setattr("src.config.MB_USE_GET_FILE_TYPE_QUERY", False)
+    monkeypatch.setattr("src.config.MB_SIGINFO_QUERIES", ())
+    monkeypatch.setattr("src.config.MB_TAGINFO_QUERIES", ())
     payload = {
         "query_status": "ok",
         "data": [

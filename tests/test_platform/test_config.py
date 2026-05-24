@@ -16,7 +16,7 @@ def test_mb_min_request_interval_default():
 
 
 def test_fallback_pe_check_mult_default():
-    assert config.FALLBACK_PE_CHECK_MULT == 1
+    assert config.FALLBACK_PE_CHECK_MULT == 5
 
 
 def test_scheduler_defaults():

@@ -65,7 +65,7 @@ OTX and curated CTI feeds use a Hybrid Strict policy: CTI text is used only as e
 
 - Sysinternals live directory.
 - GitHub release `.exe` and `.zip` assets from curated benign repositories.
-- Benign-NET (`benign_net` provider): shallow git clone under `data/repos/benign-net` (capped per run via `BENIGN_NET_MAX_DISCOVER`).
+- Benign-NET (`benign_net` provider): shallow git clone under `data/repos/benign-net`; shuffled per run, paced by discovery `request_limit`.
 - Optional local benign corpus under `data/benign`.
 
 ### PE source registry (optional)

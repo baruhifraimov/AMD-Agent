@@ -50,10 +50,9 @@ BENIGN_PROVIDER_NAMES = ("sysinternals", "github", "benign_net")
 IMBALANCE_ALERT_RATIO = 0.5
 
 MALWARE_FALLBACK_PROVIDERS = ("malshare", "threatfox", "otx_pulse_cti")
-FALLBACK_PE_CHECK_MULT = 1
+FALLBACK_PE_CHECK_MULT = 5
 PE_DOWNLOAD_MAX_BYTES = 250000
 BENIGN_NET_REPO_URL = "https://github.com/bormaa/Benign-NET.git"
-BENIGN_NET_MAX_DISCOVER = 20
 PE_DISCOVERY_MAX_URLS = 8
 MIN_PE_SOURCES = 3
 

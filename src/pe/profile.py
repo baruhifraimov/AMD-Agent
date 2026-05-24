@@ -35,6 +35,40 @@ PE_CTI_TAGS = frozenset(PE_TAG_QUERIES) | PE_FILE_EXTENSIONS
 
 MAX_FILE_TYPE_LIMIT = 1000
 
+# Malware families that consistently produce PE payloads (for get_siginfo rotation).
+PE_SIGNATURE_QUERIES: tuple[str, ...] = (
+    "AgentTesla",
+    "RedLine",
+    "AsyncRAT",
+    "Remcos",
+    "FormBook",
+    "LokiBot",
+    "NanoCore",
+    "NjRAT",
+    "Raccoon",
+    "SnakeKeylogger",
+    "GuLoader",
+    "Qakbot",
+    "IcedID",
+    "Emotet",
+    "TrickBot",
+    "Dridex",
+    "AZORult",
+    "Vidar",
+    "SmokeLoader",
+    "BumbleBee",
+    "Cobalt Strike",
+    "Amadey",
+    "DCRat",
+    "XWorm",
+    "Pikabot",
+    "DarkGate",
+    "Lumma",
+    "StealC",
+    "RisePro",
+    "PrivateLoader",
+)
+
 
 def is_pe_metadata(meta: dict[str, Any]) -> bool:
     if (meta.get("file_type_mime") or "").lower() == PE_MIME:
