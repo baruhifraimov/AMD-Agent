@@ -137,6 +137,8 @@ Installed dependencies include:
 
 ## Configuration
 
+Tuning constants live under [`src/config/`](src/config/) (feature flags in `core.py`, ML limits in `ml_settings.py`, API settings in `providers.py`). The 2304-d feature name list is in [`src/ml/feature_schema.py`](src/ml/feature_schema.py). Import surface is unchanged: `from src.config import …`.
+
 Create local environment file:
 
 ```powershell
@@ -156,9 +158,9 @@ AMD_OLLAMA_BASE_URL=http://localhost:11434
 AMD_OLLAMA_MODEL=gemma4:latest
 ```
 
-Disable Ollama entirely by setting `OLLAMA_ENABLED = False` in [`src/config.py`](src/config.py).
+Disable Ollama entirely by setting `OLLAMA_ENABLED = False` in [`src/config/core.py`](src/config/core.py).
 
-Skip only the drift narrative (keep source selection and CTI semantic filtering) with `OLLAMA_DRIFT_CONTEXT_REPORT_ENABLED = False` in [`src/config.py`](src/config.py).
+Skip only the drift narrative (keep source selection and CTI semantic filtering) with `OLLAMA_DRIFT_CONTEXT_REPORT_ENABLED = False` in [`src/config/core.py`](src/config/core.py).
 
 In Docker, compose also reads `AMD_OLLAMA_BASE_URL`. If the variable is not set,
 compose defaults it to:

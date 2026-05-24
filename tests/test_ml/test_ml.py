@@ -172,7 +172,7 @@ def test_model_retrain_excludes_temporal_holdout_from_madar(
 
 @patch("src.nodes.model_retrain.record_model_update_comparison")
 @patch("src.nodes.model_retrain.madar_retrain")
-def test_model_retrain_skips_unlabeled(mock_madar, mock_record):
+def test_model_retrain_skips_unlabeled(mock_madar, mock_record, tmp_paths):
     out = model_retrain(AgentState(new_labeled_batch=[{"sha256": "a" * 64}]))
     mock_madar.assert_not_called()
     mock_record.assert_not_called()

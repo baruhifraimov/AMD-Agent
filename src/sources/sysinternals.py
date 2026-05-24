@@ -9,7 +9,7 @@ from urllib.parse import urljoin, urlparse
 import httpx
 from bs4 import BeautifulSoup
 
-from src.config import SYSINTERNALS_BASE_URLS
+from src.collection.inventory import SYSINTERNALS_BASE_URLS
 from src.sources.base import PESourceProvider, SampleCandidate
 
 from src.log import PHASE_DISCOVERY, get_logger, phase_log, vlog

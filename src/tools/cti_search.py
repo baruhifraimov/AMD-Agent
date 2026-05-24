@@ -103,7 +103,7 @@ def fetch_public_text(url: str) -> str:
 
 def extract_pe_urls(text: str) -> list[str]:
     """Extract direct PE/archive URLs from CTI text."""
-    from src.config import CTI_DOWNLOAD_ALLOWLIST
+    from src.collection.inventory import CTI_DOWNLOAD_ALLOWLIST
 
     found: list[str] = []
     seen: set[str] = set()

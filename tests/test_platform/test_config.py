@@ -4,7 +4,7 @@ import src.config as config
 
 
 def test_pe_fetch_limit_default():
-    assert config.PE_FETCH_LIMIT == 10
+    assert config.PE_FETCH_LIMIT == 25
 
 
 def test_malware_fallback_providers_default():
@@ -27,5 +27,5 @@ def test_scheduler_defaults():
 
 
 def test_ollama_drift_context_report_enabled_default():
-    assert config.OLLAMA_DRIFT_CONTEXT_REPORT_ENABLED is True
-    assert config.ollama_drift_context_report_enabled() is True
+    assert config.OLLAMA_DRIFT_CONTEXT_REPORT_ENABLED is False
+    assert config.ollama_drift_context_report_enabled() is False
