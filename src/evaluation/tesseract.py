@@ -217,7 +217,12 @@ def latest_eval_metrics(path: Path | None = None) -> dict[str, float]:
     return latest
 
 
-def plot_performance_decay(log_path: Path | None = None, out_path: Path | None = None) -> Path:
+def plot_performance_decay(
+    log_path: Path | None = None,
+    out_path: Path | None = None,
+    *,
+    dpi: int = 300,
+) -> Path:
     """Plot accuracy/FPR over evaluation runs."""
     import matplotlib
 
@@ -227,32 +232,43 @@ def plot_performance_decay(log_path: Path | None = None, out_path: Path | None =
     cfg.ensure_dirs()
     log_path = log_path or cfg.EVAL_LOG_PATH
     out_path = out_path or cfg.FIGURES_DIR / "performance_decay.png"
+    color_acc = "#1565C0"
+    color_fpr = "#C62828"
     if not log_path.exists():
         return out_path
 
-    accs, fprs = [], []
+    records: list[dict] = []
     with log_path.open() as f:
         for line in f:
-            rec = json.loads(line)
-            m = rec.get("metrics", {})
-            if "accuracy" in m:
-                accs.append(m["accuracy"])
-            if "fpr" in m:
-                fprs.append(m["fpr"])
+            try:
+                records.append(json.loads(line))
+            except json.JSONDecodeError:
+                continue
+    records.sort(key=lambda r: r.get("timestamp", ""))
 
-    fig, ax1 = plt.subplots(figsize=(8, 4))
+    accs, fprs = [], []
+    for rec in records:
+        m = rec.get("metrics", {})
+        if "accuracy" in m:
+            accs.append(float(m["accuracy"]))
+        if "fpr" in m:
+            fprs.append(float(m["fpr"]))
+
+    fig, ax1 = plt.subplots(figsize=(10, 5))
     runs = range(1, len(accs) + 1)
     if accs:
-        ax1.plot(runs, accs, "b-o", label="Accuracy")
-    ax1.set_xlabel("Evaluation run")
-    ax1.set_ylabel("Accuracy")
+        ax1.plot(runs, accs, color=color_acc, marker="o", linewidth=2, label="Accuracy")
+    ax1.set_xlabel("Evaluation snapshot (chronological)")
+    ax1.set_ylabel("Accuracy", color=color_acc)
     ax1.set_title("TESSERACT temporal performance decay")
-    if fprs:
+    ax1.set_ylim(0, 1.05)
+    ax1.grid(True, alpha=0.3)
+    if fprs and len(fprs) == len(accs):
         ax2 = ax1.twinx()
-        ax2.plot(runs, fprs, "r--s", label="FPR")
-        ax2.set_ylabel("FPR")
+        ax2.plot(runs, fprs, color=color_fpr, marker="s", linestyle="--", linewidth=2, label="FPR")
+        ax2.set_ylabel("FPR", color=color_fpr)
     fig.tight_layout()
-    fig.savefig(out_path, dpi=120)
+    fig.savefig(out_path, dpi=dpi)
     plt.close(fig)
     return out_path
 

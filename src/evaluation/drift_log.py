@@ -38,6 +38,13 @@ def build_drift_record(
         )
     )
     retrained = state.evaluation_metrics.get("retrained")
+    pre = dict(state.drift_pre_metrics)
+    post = dict(post_metrics)
+    delta = {
+        k: float(post[k] - pre[k])
+        for k in ("accuracy", "precision", "recall", "fpr", "tpr")
+        if k in pre and k in post
+    }
 
     return {
         "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -45,7 +52,8 @@ def build_drift_record(
         "drift_stats": dict(state.drift_stats),
         "new_batch_size": new_batch_size,
         "retrained": retrained,
-        "pre_metrics": dict(state.drift_pre_metrics),
-        "post_metrics": dict(post_metrics),
+        "pre_metrics": pre,
+        "post_metrics": post,
+        "delta_metrics": delta,
         "semantic_report_excerpt": excerpt,
     }
