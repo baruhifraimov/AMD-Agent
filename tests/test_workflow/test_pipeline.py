@@ -40,8 +40,9 @@ def test_data_validation_rejects_invalid_pe(tmp_paths):
     assert row["status"] == "corrupted"
 
 
+@patch("src.nodes.explain_drift_context.ollama_drift_context_report_enabled", return_value=True)
 @patch("src.nodes.explain_drift_context.summarize_drift_context")
-def test_explain_drift_context(mock_summarize):
+def test_explain_drift_context(mock_summarize, _mock_flag):
     mock_summarize.return_value = "Drift summary."
     out = explain_drift_context(
         AgentState(drift_detected=True, drift_stats={"mean_shift": 1.0, "corr_shift": 0.3})

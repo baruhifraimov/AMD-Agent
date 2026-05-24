@@ -11,19 +11,18 @@ from src.config import (
 )
 from src.log import PHASE_DISCOVERY, get_logger, phase_log, task_status, vlog
 from src.sources.base import PESourceProvider, SampleCandidate
+from src.pe.profile import PE_CTI_TAGS
 from src.tools import malwarebazaar_api as mb
 from src.tools import threatfox_api as tf
 
 logger = get_logger(__name__)
-
-_PE_TAGS = frozenset({"exe", "dll", "sys", "scr", "peexe", "pedll", "pe"})
 _WIN_PREFIXES = ("win.", "win32.", "win64.")
 
 
 def _is_likely_pe(item: dict[str, Any]) -> bool:
     """True if ThreatFox IOC metadata strongly signals a Windows PE file."""
     tags = {t.lower() for t in (item.get("tags") or [])}
-    if tags & _PE_TAGS:
+    if tags & PE_CTI_TAGS:
         return True
     malware = (item.get("malware") or "").lower()
     threat_type = (item.get("threat_type") or "").lower()

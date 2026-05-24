@@ -6,7 +6,7 @@ from typing import Any
 
 import numpy as np
 
-from src.config import FEATURE_NAMES
+from src.ml.feature_schema import FEATURE_NAMES
 from src.ml.classifier import load_bundle, model_bundle_ready
 from src.ml.drift import DriftMonitor
 from src.ml.features import features_to_vector

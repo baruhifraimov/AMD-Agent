@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import random
 import subprocess
 from pathlib import Path
 
-from src.config import BENIGN_NET_MAX_DISCOVER, BENIGN_NET_REPO_URL, REPOS_DIR, ensure_dirs
+from src.config import BENIGN_NET_REPO_URL, REPOS_DIR, ensure_dirs
 from src.sources.base import PESourceProvider, SampleCandidate
 
 from src.log import PHASE_DISCOVERY, get_logger, phase_log, vlog
@@ -43,29 +44,24 @@ class BenignNetProvider(PESourceProvider):
         return dest
 
     def discover(self, limit: int) -> list[SampleCandidate]:
-        cap = min(limit, BENIGN_NET_MAX_DISCOVER)
         try:
             root = self._ensure_repo()
         except (subprocess.CalledProcessError, OSError, subprocess.TimeoutExpired) as exc:
             logger.warning("[%s] Benign-NET repo unavailable: %s", PHASE_DISCOVERY, exc)
             return []
 
-        candidates: list[SampleCandidate] = []
-        for path in root.rglob("*.exe"):
-            if not path.is_file():
-                continue
-            candidates.append(
-                SampleCandidate(
-                    external_id=str(path.resolve()),
-                    provider=self.name,
-                    expected_label=self.expected_label,
-                    download_ref={"path": str(path.resolve())},
-                    metadata={"source": "benign_net", "file_name": path.name},
-                )
+        paths = [p for p in root.rglob("*.exe") if p.is_file()]
+        random.shuffle(paths)
+        return [
+            SampleCandidate(
+                external_id=str(path.resolve()),
+                provider=self.name,
+                expected_label=self.expected_label,
+                download_ref={"path": str(path.resolve())},
+                metadata={"source": "benign_net", "file_name": path.name},
             )
-            if len(candidates) >= cap:
-                break
-        return candidates
+            for path in paths[:limit]
+        ]
 
     def download(self, candidate: SampleCandidate) -> bytes:
         path = Path(

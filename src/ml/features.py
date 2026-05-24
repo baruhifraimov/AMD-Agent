@@ -13,14 +13,13 @@ from typing import Any
 import numpy as np
 import pefile
 
-from src.config import (
+from src.config import FEATURE_DIM, FEATURE_SET_VERSION
+from src.ml.feature_schema import (
     BYTE_ENTROPY_FEATURE_NAMES,
     BYTE_HIST_FEATURE_NAMES,
     EXEC_API_NAMES,
     EXPORT_HASH_FEATURE_NAMES,
-    FEATURE_DIM,
     FEATURE_NAMES,
-    FEATURE_SET_VERSION,
     IMPORT_HASH_FEATURE_NAMES,
     OPCODE_FEATURE_NAMES,
     PRINTABLE_FEATURE_NAMES,
