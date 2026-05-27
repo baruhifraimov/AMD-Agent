@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import random
 import subprocess
+import time
 from pathlib import Path
 
 from src.config import BENIGN_NET_REPO_URL, REPOS_DIR, ensure_dirs
@@ -14,6 +15,7 @@ from src.log import PHASE_DISCOVERY, get_logger, phase_log, vlog
 logger = get_logger(__name__)
 
 _REPO_NAME = "benign-net"
+_PULL_INTERVAL_SECS = 7 * 24 * 3600  # cache fresh ~1 week — skip pull otherwise
 
 
 class BenignNetProvider(PESourceProvider):
@@ -31,16 +33,19 @@ class BenignNetProvider(PESourceProvider):
             phase_log(logger, PHASE_DISCOVERY, "Cloning Benign-NET into %s", dest)
             subprocess.check_call(
                 ["git", "clone", "--depth", "1", BENIGN_NET_REPO_URL, str(dest)],
-                timeout=600,
+                timeout=300,
             )
-        else:
-            try:
-                subprocess.check_call(
-                    ["git", "-C", str(dest), "pull", "--ff-only"],
-                    timeout=300,
-                )
-            except subprocess.CalledProcessError as exc:
-                logger.warning("[%s] Benign-NET git pull failed: %s", PHASE_DISCOVERY, exc)
+            return dest
+        fetch_head = dest / ".git" / "FETCH_HEAD"
+        if fetch_head.exists() and (time.time() - fetch_head.stat().st_mtime) < _PULL_INTERVAL_SECS:
+            return dest  # cached copy still fresh — skip network
+        try:
+            subprocess.check_call(
+                ["git", "-C", str(dest), "pull", "--ff-only"],
+                timeout=120,
+            )
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
+            logger.warning("[%s] Benign-NET pull failed; using cached copy: %s", PHASE_DISCOVERY, exc)
         return dest
 
     def discover(self, limit: int) -> list[SampleCandidate]:

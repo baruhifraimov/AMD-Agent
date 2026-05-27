@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import random
 import zipfile
 from typing import Any
 
@@ -18,6 +19,7 @@ from src.log import PHASE_DISCOVERY, get_logger, phase_log, vlog
 logger = get_logger(__name__)
 
 DISCOVERABLE_ASSET_SUFFIXES = (".exe", ".zip")
+_RELEASES_PER_REPO = 5  # widen beyond /releases/latest to avoid stale repos
 
 
 class GitHubReleasesProvider(PESourceProvider):
@@ -84,19 +86,27 @@ class GitHubReleasesProvider(PESourceProvider):
         return {"Accept": "application/vnd.github+json"}
 
     def _list_release_assets(self, owner: str, repo: str) -> list[dict[str, Any]]:
-        url = f"{GITHUB_API_URL}/repos/{owner}/{repo}/releases/latest"
+        url = f"{GITHUB_API_URL}/repos/{owner}/{repo}/releases"
         with httpx.Client(timeout=60.0) as client:
-            response = client.get(url, headers=self._headers())
+            response = client.get(
+                url,
+                headers=self._headers(),
+                params={"per_page": _RELEASES_PER_REPO},
+            )
             if response.status_code == 404:
                 return []
             response.raise_for_status()
-            payload = response.json()
-        return payload.get("assets") or []
+            releases = response.json() or []
+        assets: list[dict[str, Any]] = []
+        for release in releases:
+            assets.extend(release.get("assets") or [])
+        random.shuffle(assets)  # avoid always picking same first asset
+        return assets
 
     @staticmethod
     def _extract_first_pe_from_zip(data: bytes) -> bytes:
         with zipfile.ZipFile(io.BytesIO(data)) as zf:
-            for name in zf.namelist():
-                if name.lower().endswith(PE_ARCHIVE_SUFFIXES):
-                    return zf.read(name)
-        raise RuntimeError("No PE file found inside GitHub release zip")
+            pe_names = [n for n in zf.namelist() if n.lower().endswith(PE_ARCHIVE_SUFFIXES)]
+            if not pe_names:
+                raise RuntimeError("No PE file found inside GitHub release zip")
+            return zf.read(random.choice(pe_names))
