@@ -1,0 +1,111 @@
+\section{Related Work}
+
+This section reviews the papers and tools that directly influenced AMD-Agent. 
+For each item, we summarize the methodology or purpose, its strengths and limitations, a short comparison to our work, and how it contributed to our system design. 
+Table~\ref{tab:related_work_tools} provides a consolidated overview.
+
+\subsection{pefile}
+\textit{pefile} is a Python library for static parsing of Windows Portable Executable (PE) files. 
+It exposes PE headers, sections, imports, exports, resources, timestamps, data directories, and other metadata without executing the binary. 
+
+\textbf{Strengths:} Mature and widely used; simple Python API; safe static parsing; exposes many PE structures needed for malware feature extraction.
+
+\textbf{Limitations:} Static-only; cannot observe runtime behavior; packed, corrupted, or intentionally malformed binaries may produce incomplete parsing results.
+
+\textbf{Comparison \& Contribution:} Unlike dynamic analysis tools, \textit{pefile} does not execute malware. This matches our design choice for a lightweight, safe static-analysis pipeline. We use it in the FeatureExtraction stage to extract headers, section statistics, and entropy.
+
+\subsection{EMBER}
+Anderson and Roth~\cite{anderson2018ember} introduce EMBER, a well-known dataset and feature representation for static PE malware classification. 
+
+\textbf{Strengths:} Strong malware-specific feature baseline; reproducible; practical for large-scale static classification.
+
+\textbf{Limitations:} Static features can be evaded through packing. The original EMBER feature vector is fixed.
+
+\textbf{Comparison \& Contribution:} EMBER directly inspired our 2304-dimensional EMBER-like static PE feature vector. AMD-Agent applies this philosophy in a live continual-learning pipeline with automatic drift detection.
+
+\subsection{MalwareBazaar API}
+MalwareBazaar is a public malware-sharing platform operated by abuse.ch. 
+
+\textbf{Strengths:} Live real-world malware source; metadata-rich; supports SHA256 lookup and sample download.
+
+\textbf{Limitations:} API quotas and availability issues; metadata may be noisy; malware handling requires strict sandboxing.
+
+\textbf{Comparison \& Contribution:} MalwareBazaar is our main malware acquisition source. AMD-Agent uses it in SourceDiscovery and BinaryFetch for PE discovery and sandboxed download.
+
+\subsection{River and ADWIN}
+River is an online machine-learning library for streaming data, featuring ADWIN, an adaptive windowing algorithm for detecting changes in data streams.
+
+\textbf{Strengths:} Lightweight; suitable for online settings; provides tested streaming drift-detection algorithms.
+
+\textbf{Limitations:} Drift detection depends heavily on the monitored signal and threshold configuration.
+
+\textbf{Comparison \& Contribution:} River/ADWIN is utilized in our DriftMonitor over section entropy, alongside rolling multivariate feature-shift checks, to trigger our retraining nodes.
+
+\subsection{MADAR}
+Rahman et al.~\cite{rahman2025madar} propose MADAR, a continual-learning method for malware analysis based on diversity-aware replay to reduce catastrophic forgetting.
+
+\textbf{Strengths:} Replay helps preserve older knowledge; diversity-aware selection is highly suitable for shifting malware campaigns.
+
+\textbf{Limitations:} Requires stored historical samples; replay alone does not prevent evaluation leakage.
+
+\textbf{Comparison \& Contribution:} MADAR inspired our ModelRetrain component. We use replay samples mixed with newly labeled data to retrain the LightGBM classifier.
+
+\subsection{TESSERACT}
+Pendlebury et al.~\cite{pendlebury2019tesseract} propose TESSERACT, an evaluation methodology for malware classification that reduces temporal bias using chronological splits.
+
+\textbf{Strengths:} More realistic than random splits; explicitly addresses temporal bias.
+
+\textbf{Limitations:} Requires enough labeled samples in each chronological split; metrics become unreliable on single-class splits.
+
+\textbf{Comparison \& Contribution:} TESSERACT inspired our chronological evaluation design, ensuring older data is never evaluated on newer models.
+
+\begin{table*}[htbp]
+\centering
+\caption{Summary of related papers and tools}
+\label{tab:related_work_tools}
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{p{2.3cm} p{1.9cm} p{3.5cm} p{4.2cm} p{4.1cm}}
+\toprule
+\textbf{Item} & \textbf{Type} & \textbf{Purpose} & \textbf{Pros / Cons} & \textbf{How We Used It} \\
+\midrule
+
+pefile 
+& Tool 
+& Static parsing of Windows PE files. 
+& Pros: mature, safe. Cons: static-only. 
+& Used for extracting PE headers, sections, and entropy. \\
+
+EMBER 
+& Paper / Feature Method 
+& Static PE malware representation. 
+& Pros: strong reproducible baseline. Cons: static features can be evaded. 
+& Basis for our 2304-dimensional EMBER-like static PE vector. \\
+
+MalwareBazaar 
+& Tool / API 
+& Live malware metadata download. 
+& Pros: real-world malware. Cons: quotas, noisy samples. 
+& Main malware source for discovery and validation. \\
+
+River / ADWIN 
+& Tool / Algorithm 
+& Streaming drift detection. 
+& Pros: lightweight and online. Cons: threshold tuning required. 
+& Used in DriftMonitor over section entropy. \\
+
+MADAR 
+& Paper / Method 
+& Replay-based continual learning. 
+& Pros: reduces forgetting. Cons: depends on stored data. 
+& Used to guide replay-based retraining. \\
+
+TESSERACT 
+& Paper / Evaluation 
+& Chronological malware evaluation. 
+& Pros: realistic time-aware evaluation. Cons: requires healthy temporal splits. 
+& Used for chronological Accuracy, Precision, Recall, FPR evaluation. \\
+
+\bottomrule
+\end{tabular}%
+}
+\end{table*}
