@@ -2,6 +2,10 @@
 
 AMD-Agent is an autonomous, LLM-assisted continual-learning system for **Windows PE malware detection**. It continuously collects malware and benign samples from live sources, validates and featurizes them using safe static analysis, monitors **concept drift**, and updates a **LightGBM** classifier using **replay-based retraining**. Each model update is evaluated with a **strict temporal holdout** to enable reliable before/after comparisons.
 
+**Academic artifacts:**
+- Report (PDF): [`amd_agent_report/amd_agent_report.pdf`](amd_agent_report/amd_agent_report.pdf)
+- Presentation (PPTX): [`amd_agent_report/AMD_Agent_presentation.pptx`](amd_agent_report/AMD_Agent_presentation.pptx)
+
 **Safety:** AMD-Agent ingests live, weaponized binaries. **Do not execute downloaded samples.** Run only in Docker or an isolated malware-analysis VM.
 
 ## Quickstart (Docker)
